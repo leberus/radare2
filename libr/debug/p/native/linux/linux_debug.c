@@ -193,6 +193,8 @@ bool linux_set_options (RDebug *dbg, int pid) {
 	return true;
 }
 
+
+
 int linux_attach (RDebug *dbg, int pid) {
 	RList *list;
 	linux_set_options (dbg, pid);
@@ -205,24 +207,21 @@ int linux_attach (RDebug *dbg, int pid) {
 			RDebugPid *th;
 			RListIter *it;
 			r_list_foreach (list, it, th) {
-				if (th->pid) {
+				if (th->pid && th->pid != pid) {
 try_to_stop_again:
 					eprintf ("Attaching to pid: %d\n", th->pid);
 					int ret = ptrace (PTRACE_ATTACH, th->pid, 0, 0);
-					if (ret == -1) {
-						perror ("Could not attach to thread: ptrace (PT_ATTACH)");
-					} else {
-						perror ("ptrace (PT_ATTACH)");
-						int wstatus;
-						waitpid (th->pid, &wstatus, WUNTRACED);
-						if (!WIFSTOPPED (wstatus)) {
-							goto try_to_stop_again;
-						}
+					perror ("ptrace (PT_ATTACH)");
+					int wstatus;
+					waitpid (th->pid, &wstatus, WUNTRACED);
+					if (!WIFSTOPPED (wstatus)) {
+						eprintf ("Not stopped");
+						goto try_to_stop_again;
 					}
 				}
 			}
 		}
-	}
+	} 
 				
 
 	//int ret = ptrace (PTRACE_ATTACH, pid, 0, 0);
