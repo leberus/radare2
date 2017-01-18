@@ -1977,6 +1977,8 @@ static void r_core_cmd_bp(RCore *core, const char *input) {
 		"dbtj", "", "Display backtrace in JSON",
 		"dbte", " <addr>", "Enable Breakpoint Trace",
 		"dbtd", " <addr>", "Disable Breakpoint Trace",
+		"dbtne", "",  "Add a breakpoint into all no-return functions",
+		"dbtnd", "", "Remove breakpoints from all no-return functions",
 		"dbts", " <addr>", "Swap Breakpoint Trace",
 		"dbm", " <module> <offset>", "Add a breakpoint at an offset from a module's base",
 		"dbn", " [<name>]", "Show or set name for current breakpoint",
@@ -2045,6 +2047,26 @@ static void r_core_cmd_bp(RCore *core, const char *input) {
 					r_bp_set_trace_all (core->dbg->bp,false);
 				} else if (!r_bp_set_trace (core->dbg->bp, addr, false)) {
 					eprintf ("Cannot unset tracepoint\n");
+				}
+				break;
+			case 'n':
+				switch (input[3]) {
+					case 'e':
+						eprintf ("dbtne - Adding breakpoints into all no-return functions\n");
+						break;
+					case 'd':
+						eprintf ("dbtnd - Removing breakpoints from all no-return functions\n");
+						break;
+					default:
+					{
+						const char *dbtn_help_msg[] = {
+							"Usage: dbtn[e|n]", "", " # Breakpoints on no-return functions",
+							"dbtne", "", "Add a breakpoint into all no-return functions",
+							"dbtnd", "", "Remove breakpoints from all no-return functions",
+							NULL};
+						r_core_cmd_help (core, dbtn_help_msg);
+					}
+						break;
 				}
 				break;
 			case 's': // "dbts"
