@@ -365,6 +365,7 @@ static bool cmd_wf(RCore *core, const char *input) {
 		if (out) {
 			r_io_write_at (core->io, core->offset,
 				(ut8*)out, strlen (out));
+			r_core_block_read (core);
 			free (out);
 		}
 	}
@@ -411,8 +412,8 @@ static int cmd_write(void *data, const char *input) {
 		"w6","[de] base64/hex","write base64 [d]ecoded or [e]ncoded string",
 		"wa","[?] push ebp","write opcode, separated by ';' (use '\"' around the command)",
 		"waf"," file","assemble file and write bytes",
-		"wao"," [?] op","modify opcode (change conditional of jump. nop, etc)",
-		"wA"," [?] r 0","alter/modify opcode at current seek (see wA?)",
+		"wao","[?] op","modify opcode (change conditional of jump. nop, etc)",
+		"wA","[?] r 0","alter/modify opcode at current seek (see wA?)",
 		"wb"," 010203","fill current block with cyclic hexpairs",
 		"wB","[-]0xVALUE","set or unset bits with given value",
 		"wc","","list all write changes",
@@ -423,10 +424,10 @@ static int cmd_write(void *data, const char *input) {
 		"wh"," r2","whereis/which shell command",
 		"wm"," f0ff","set binary mask hexpair to be used as cyclic write mask",
 		"wo","[?] hex","write in block with operation. 'wo?' fmi",
-		"wp"," [?] -|file","apply radare patch file. See wp? fmi",
+		"wp","[?] -|file","apply radare patch file. See wp? fmi",
 		"wr"," 10","write 10 random bytes",
 		"ws"," pstring","write 1 byte for length and then the string",
-		"wt[f]"," [?] file [sz]","write to file (from current seek, blocksize or sz bytes)",
+		"wt[f]","[?] file [sz]","write to file (from current seek, blocksize or sz bytes)",
 		"wts"," host:port [sz]", "send data to remote host:port via tcp://",
 		"ww"," foobar","write wide string 'f\\x00o\\x00o\\x00b\\x00a\\x00r\\x00'",
 		"wx","[?][fs] 9090","write two intel nops (from wxfile or wxseek)",
@@ -464,7 +465,8 @@ static int cmd_write(void *data, const char *input) {
 			if (len>0) {
 				ut8 *buf = calloc (1, len);
 				if (buf) {
-					r_io_write (core->io, buf, len);
+					r_io_write_at (core->io, core->offset, buf, len);
+					r_core_block_read (core);
 					free (buf);
 				} else eprintf ("Cannot allocate %d bytes\n", (int)len);
 			}
@@ -493,8 +495,8 @@ static int cmd_write(void *data, const char *input) {
 	case '6':
 		{
 		int fail = 0;
-		ut8 *buf;
-		int len, str_len;
+		ut8 *buf = NULL;
+		int len = 0, str_len;
 		const char *str;
 
 		if (input[1] && input[2] != ' ')
@@ -697,8 +699,15 @@ static int cmd_write(void *data, const char *input) {
 					free (data);
 				}
 			} else {
-				eprintf ("Usage: wp [-|r2patch-file]\n"
-			         "TODO: rapatch format documentation here\n");
+				r_cons_printf ("Usage: wp [-|r2patch-file]\n"
+					" ^# -> comments\n"
+					" . -> execute command\n"
+					" ! -> execute command\n"
+					" OFFSET { code block }\n"
+					" OFFSET \"string\"\n"
+					" OFFSET 01020304\n"
+					" OFFSET : assembly\n"
+					" + {code}|\"str\"|0210|: asm\n");
 			}
 		}
 		break;
@@ -941,11 +950,7 @@ static int cmd_write(void *data, const char *input) {
 							addr = core->offset;
 						}
 						ut8 *buf = calloc (1, sz);
-						if (space) {
-							(void)r_io_vread (core->io, addr, buf, sz);
-						} else {
-							(void)r_io_pread (core->io, addr, buf, sz);
-						}
+						r_io_read_at (core->io, addr, buf, sz);
 						RSocket *s = r_socket_new (false);
 						if (r_socket_connect (s, host, port, R_SOCKET_PROTO_TCP, 0)) {
 							int done = 0;
@@ -977,7 +982,7 @@ static int cmd_write(void *data, const char *input) {
 				"Usage:", "wt[a] file [size]", " Write 'size' bytes in current blok to 'file'",
 				"wta", " [filename]", "append to 'filename'",
 				"wtf", " [filename] [size]", "write to file (see also 'wxf' and 'wf?')",
-				"wtf!", " [filename]", "write to file from current addresss to eof",
+				"wtf!", " [filename]", "write to file from current address to eof",
 				NULL};
 			r_core_cmd_help (core, help_msg);
 			free (ostr);

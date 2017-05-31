@@ -134,7 +134,7 @@ aarch64_select_operand_for_sizeq_field_coding (const aarch64_opcode *opcode)
     significant_operand_index [get_data_pattern (opcode->qualifiers_list[0])];
 }
 
-const aarch64_field fields[] =
+const aarch64_field aarch64_fields[] =
 {
     {  0,  0 },	/* NIL.  */
     {  0,  4 },	/* cond2: condition in truly conditional-executed inst.  */
@@ -840,7 +840,7 @@ static int
 match_operands_qualifier (aarch64_inst *inst, bfd_boolean update_p)
 {
   int i;
-  aarch64_opnd_qualifier_seq_t qualifiers;
+  aarch64_opnd_qualifier_seq_t qualifiers = {0};
 
   if (!aarch64_find_best_match (inst, inst->opcode->qualifiers_list, -1,
 			       qualifiers))
@@ -2223,7 +2223,7 @@ static void
 print_register_offset_address (char *buf, size_t size,
 			       const aarch64_opnd_info *opnd)
 {
-  const size_t tblen = 16;
+#define tblen 16
   char tb[tblen];		/* Temporary buffer.  */
   bfd_boolean lsl_p = FALSE;	/* Is LSL shift operator?  */
   bfd_boolean wm_p = FALSE;	/* Should Rm be Wm?  */
@@ -2266,6 +2266,7 @@ print_register_offset_address (char *buf, size_t size,
   snprintf (buf, size, "[%s,%c%d%s]",
 	    get_64bit_int_reg_name (opnd->addr.base_regno, 1),
 	    wm_p ? 'w' : 'x', opnd->addr.offset.regno, tb);
+#undef tblen
 }
 
 /* Generate the string representation of the operand OPNDS[IDX] for OPCODE

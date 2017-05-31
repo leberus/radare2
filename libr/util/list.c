@@ -427,7 +427,6 @@ R_API void *r_list_get_n(const RList *list, int n) {
 	return NULL;
 }
 
-
 R_API RListIter *r_list_contains(const RList *list, const void *p) {
 	void *q;
 	RListIter *iter;
@@ -451,22 +450,34 @@ R_API RListIter *r_list_find(const RList *list, const void *p, RListComparator c
 }
 
 static RListIter *_merge(RListIter *first, RListIter *second, RListComparator cmp) {
-	if (!first) {
-		return second;
+	RListIter *next = NULL, *result = NULL, *head = NULL;
+	while (first || second) {
+		if (!second) {
+			next = first;
+			first = first->n;
+		} else if (!first) {
+			next = second;
+			second = second->n;
+		} else if (cmp (first->data, second->data) < 0) {
+			next = first;
+			first = first->n;
+		} else {
+			next = second;
+			second = second->n;
+		}
+		if (!head) {
+			result = next;
+			head = result;
+			head->p = NULL;
+		} else {
+			result->n = next;
+			next->p = result;
+			result = result->n;
+		}
 	}
-	if (!second) {
-		return first;
-	}
-	if (cmp (first->data, second->data) > 0) {
-		second->n = _merge (first, second->n, cmp);
-		second->n->p = second;
-		second->p = NULL;
-		return second;
-	}
-	first->n = _merge (first->n, second, cmp);
-	first->n->p = first;
-	first->p = NULL;
-	return first;
+	head->p = NULL;
+	next->n = NULL;
+	return head;
 }
 
 static RListIter * _r_list_half_split(RListIter *head) {

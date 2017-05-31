@@ -81,7 +81,6 @@ struct MACH0_(SObjcPropertyList) {
 	/* struct SObjcProperty first;  These structures follow inline */
 };
 
-///////////////////////////////////////////////////////////////////////////////
 static mach0_ut get_pointer(mach0_ut p, ut32 *offset, ut32 *left, RBinFile *arch);
 static void copy_sym_name_with_namespace(char *class_name, char *read_name, RBinSymbol *sym);
 static void get_ivar_list_t(mach0_ut p, RBinFile *arch, RBinClass *klass);
@@ -90,19 +89,16 @@ static void get_method_list_t(mach0_ut p, RBinFile *arch, char *class_name, RBin
 static void get_protocol_list_t(mach0_ut p, RBinFile *arch, RBinClass *klass);
 static void get_class_ro_t(mach0_ut p, RBinFile *arch, ut32 *is_meta_class, RBinClass *klass);
 static void get_class_t(mach0_ut p, RBinFile *arch, RBinClass *klass, bool dupe);
-static void __r_bin_class_free(RBinClass *p);
-
-static int is_thumb(RBinFile *arch) {
+static bool is_thumb(RBinFile *arch) {
 	struct MACH0_(obj_t) *bin = (struct MACH0_(obj_t) *)arch->o->bin_obj;
 	if (bin->hdr.cputype == 12) {
 		if (bin->hdr.cpusubtype == 9) {
-			return 1;
+			return true;
 		}
 	}
-	return 0;
+	return false;
 }
 
-///////////////////////////////////////////////////////////////////////////////
 static mach0_ut get_pointer(mach0_ut p, ut32 *offset, ut32 *left, RBinFile *arch) {
 	mach0_ut r;
 	mach0_ut addr;
@@ -147,7 +143,6 @@ static mach0_ut get_pointer(mach0_ut p, ut32 *offset, ut32 *left, RBinFile *arch
 	return 0;
 }
 
-///////////////////////////////////////////////////////////////////////////////
 static void copy_sym_name_with_namespace(char *class_name, char *read_name, RBinSymbol *sym) {
 	if (!class_name) {
 		class_name = "";
@@ -156,7 +151,6 @@ static void copy_sym_name_with_namespace(char *class_name, char *read_name, RBin
 	sym->name = strdup (read_name);
 }
 
-///////////////////////////////////////////////////////////////////////////////
 static void get_ivar_list_t(mach0_ut p, RBinFile *arch, RBinClass *klass) {
 	struct MACH0_(SIVarList) il;
 	struct MACH0_(SIVar) i;
@@ -598,9 +592,10 @@ static void get_method_list_t(mach0_ut p, RBinFile *arch, char *class_name, RBin
 		}
 #endif
 		method->vaddr = m.imp;
-		method->type = is_static
-			? "FUNC"
-			: "METH";
+		method->type = is_static ? "FUNC" : "METH";
+		if (is_static) {
+			method->method_flags |= R_BIN_METH_CLASS;
+		}
 		if (is_thumb (arch)) {
 			if (method->vaddr & 1) {
 				method->vaddr >>= 1;
@@ -640,7 +635,6 @@ static void get_protocol_list_t(mach0_ut p, RBinFile *arch, RBinClass *klass) {
 	if (!(r = get_pointer (p, &offset, &left, arch))) {
 		return;
 	}
-
 	if (r + left < r || r + sizeof (struct MACH0_(SProtocolList)) < r) {
 		return;
 	}
@@ -742,7 +736,7 @@ static void get_protocol_list_t(mach0_ut p, RBinFile *arch, RBinClass *klass) {
 				name = strdup ("some_encrypted_data");
 				left = strlen (name) + 1;
 			} else {
-				name = malloc (left);
+				name = malloc (left + 1);
 				if (!name) {
 					return;
 				}
@@ -750,6 +744,7 @@ static void get_protocol_list_t(mach0_ut p, RBinFile *arch, RBinClass *klass) {
 					R_FREE (name);
 					return;
 				}
+				name[left] = 0;
 			}
 			class_name = r_str_newf ("%s::%s%s", klass->name, "(protocol)", name);
 			R_FREE (name);
@@ -768,7 +763,7 @@ static void get_protocol_list_t(mach0_ut p, RBinFile *arch, RBinClass *klass) {
 }
 
 static const char *skipnum(const char *s) {
-	while (IS_NUMBER (*s)) s++;
+	while (IS_DIGIT (*s)) s++;
 	return s;
 }
 
@@ -899,7 +894,7 @@ static void get_class_ro_t(mach0_ut p, RBinFile *arch, ut32 *is_meta_class, RBin
 #endif
 
 	if (cro.baseMethods > 0) {
-		get_method_list_t (cro.baseMethods, arch, klass->name, klass, false);
+		get_method_list_t (cro.baseMethods, arch, klass->name, klass, (cro.flags & RO_META) ? true : false);
 	}
 
 	if (cro.baseProtocols > 0) {
@@ -924,7 +919,6 @@ static mach0_ut get_isa_value() {
 	return 0;
 }
 
-///////////////////////////////////////////////////////////////////////////////
 static void get_class_t(mach0_ut p, RBinFile *arch, RBinClass *klass, bool dupe) {
 	struct MACH0_(SClass) c = { 0 };
 	const int size = sizeof (struct MACH0_(SClass));
@@ -940,7 +934,6 @@ static void get_class_t(mach0_ut p, RBinFile *arch, RBinClass *klass, bool dupe)
 		return;
 	}
 	bigendian = arch->o->info->big_endian;
-
 	if (!(r = get_pointer (p, &offset, &left, arch))) {
 		return;
 	}
@@ -953,7 +946,6 @@ static void get_class_t(mach0_ut p, RBinFile *arch, RBinClass *klass, bool dupe)
 	if (r + size > arch->size) {
 		return;
 	}
-
 	if (left < size) {
 		eprintf ("Cannot parse obj class info out of bounds\n");
 		return;
@@ -988,29 +980,6 @@ static void get_class_t(mach0_ut p, RBinFile *arch, RBinClass *klass, bool dupe)
 		get_class_t (c.isa + isa_n_value, arch, klass, true);
 		klass->addr = tmp;
 	}
-}
-
-///////////////////////////////////////////////////////////////////////////////
-static void __r_bin_class_free(RBinClass *p) {
-	RBinSymbol *symbol = NULL;
-	RBinField *field = NULL;
-	RListIter *iter = NULL;
-
-	if (!p) {
-		return;
-	}
-	r_list_foreach (p->methods, iter, symbol) {
-		free (symbol->name);
-		free (symbol->classname);
-		R_FREE (symbol);
-	}
-	r_list_foreach (p->fields, iter, field) {
-		free (field->name);
-		R_FREE (field);
-	}
-	r_list_free (p->methods);
-	r_list_free (p->fields);
-	r_bin_class_free (p);
 }
 
 #if 0
@@ -1061,7 +1030,8 @@ RList *MACH0_(parse_classes)(RBinFile *arch) {
 	bool is_found = false;
 	mach0_ut p = 0;
 	ut32 left = 0;
-	int len, paddr;
+	int len;
+	ut64 paddr;
 	bool bigendian;
 	ut8 pp[sizeof (mach0_ut)] = {0};
 
@@ -1071,7 +1041,7 @@ RList *MACH0_(parse_classes)(RBinFile *arch) {
 	bigendian = obj->info->big_endian;
 
 	/* check if it's Swift */
-	//ret = parse_swift_classes (arch);
+	// ret = parse_swift_classes (arch);
 
 	// searching of section with name __objc_classlist
 	if (!(sctns = r_bin_plugin_mach.sections (arch))) {
@@ -1094,7 +1064,7 @@ RList *MACH0_(parse_classes)(RBinFile *arch) {
 	}
 	// end of seaching of section with name __objc_classlist
 
-	if (!ret && !(ret = r_list_newf ((RListFree)__r_bin_class_free))) {
+	if (!ret && !(ret = r_list_newf ((RListFree)r_bin_class_free))) {
 		// retain just for debug
 		// eprintf ("RList<RBinClass> allocation error\n");
 		goto get_classes_error;
@@ -1112,13 +1082,11 @@ RList *MACH0_(parse_classes)(RBinFile *arch) {
 			// eprintf ("RBinClass allocation error\n");
 			goto get_classes_error;
 		}
-
 		if (!(klass->methods = r_list_new ())) {
 			// retain just for debug
 			// eprintf ("RList<RBinField> allocation error\n");
 			goto get_classes_error;
 		}
-
 		if (!(klass->fields = r_list_new ())) {
 			// retain just for debug
 			// eprintf ("RList<RBinSymbol> allocation error\n");
@@ -1152,6 +1120,6 @@ RList *MACH0_(parse_classes)(RBinFile *arch) {
 get_classes_error:
 	r_list_free (sctns);
 	r_list_free (ret);
-	__r_bin_class_free (klass);
+	// XXX DOUBLE FREE r_bin_class_free (klass);
 	return NULL;
 }

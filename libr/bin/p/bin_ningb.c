@@ -1,4 +1,4 @@
-/* radare - LGPL - 2013 - 2015 - condret@runas-racer.com */
+/* radare - LGPL - 2013 - 2017 - condret@runas-racer.com */
 
 #include <r_types.h>
 #include <r_util.h>
@@ -7,36 +7,27 @@
 #include <string.h>
 #include "../format/nin/nin.h"
 
-static Sdb* get_sdb (RBinObject *o) {
-	if (!o) return NULL;
-	//struct r_bin_[NAME]_obj_t *bin = (struct r_bin_r_bin_[NAME]_obj_t *) o->bin_obj;
-	//if (bin->kv) return kv;
-	return NULL;
-}
-
 static void * load_bytes(RBinFile *arch, const ut8 *buf, ut64 sz, ut64 loadaddr, Sdb *sdb){
-	return R_NOTNULL;
+	return &load_bytes;
 }
 
-static int check_bytes(const ut8 *buf, ut64 length) {
+static bool check_bytes(const ut8 *buf, ut64 length) {
 	ut8 lict[48];
-	if (!buf || length < (0x104+48))
+	if (!buf || length < (0x104 + 48)) {
 		return 0;
+	}
 	memcpy (lict, buf + 0x104, 48);
 	return (!memcmp (lict, lic, 48))? 1: 0;
 }
 
-static int check(RBinFile *arch) {
+static bool load(RBinFile *arch) {
 	const ut8 *bytes = arch ? r_buf_buffer (arch->buf) : NULL;
 	ut64 sz = arch ? r_buf_size (arch->buf): 0;
-	return check_bytes (bytes, sz);
-}
-
-static int load(RBinFile *arch) {
-	const ut8 *bytes = arch ? r_buf_buffer (arch->buf) : NULL;
-	ut64 sz = arch ? r_buf_size (arch->buf): 0;
-	if (!arch || !arch->o) return false;
-	arch->o->bin_obj = load_bytes (arch, bytes, sz, arch->o->loadaddr, arch->sdb);
+	ut64 la = (arch && arch->o) ? arch->o->loadaddr: 0;
+	if (!arch || !arch->o) {
+		return false;
+	}
+	arch->o->bin_obj = load_bytes (arch, bytes, sz, la, arch->sdb);
 	return check_bytes (bytes, sz);
 }
 
@@ -75,7 +66,7 @@ static RList* entries(RBinFile *arch) {
 		ret->free = free;
 		if (!(ptr = R_NEW0 (RBinAddr)))
 			return ret;
-		ptr->paddr = ptr->vaddr = 0x100;
+		ptr->paddr = ptr->vaddr = ptr->haddr = 0x100;
 		r_list_append (ret, ptr);
 	}
 	return ret;
@@ -95,10 +86,17 @@ static RList* sections(RBinFile *arch){
 
 	r_buf_read_at (arch->buf, 0x148, &bank, 1);
 	bank = gb_get_rombanks(bank);
+#ifdef _MSC_VER
+	RBinSection **rombank = (RBinSection**) malloc (sizeof (RBinSection*) * bank);
+#else
 	RBinSection *rombank[bank];
+#endif
 
 	if (!arch->buf) {
 		free (ret);
+#ifdef _MSC_VER
+		free (rombank);
+#endif
 		return NULL;
 	}
 
@@ -125,6 +123,9 @@ static RList* sections(RBinFile *arch){
 		rombank[i]->add = true;
 		r_list_append (ret,rombank[i]);
 	}
+#ifdef _MSC_VER
+	free (rombank);
+#endif
 	return ret;
 }
 
@@ -287,11 +288,9 @@ struct r_bin_plugin_t r_bin_plugin_ningb = {
 	.name = "ningb",
 	.desc = "Gameboy format r_bin plugin",
 	.license = "LGPL3",
-	.get_sdb = &get_sdb,
 	.load = &load,
 	.load_bytes = &load_bytes,
 	.destroy = &destroy,
-	.check = &check,
 	.check_bytes = &check_bytes,
 	.baddr = &baddr,
 	.binsym = &binsym,

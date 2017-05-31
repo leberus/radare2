@@ -1,4 +1,6 @@
 clang-log/
+.clang-format
+.tmp-format
 *._d
 *._o
 *.[ado]
@@ -7,6 +9,9 @@ clang-log/
 *.sdb
 *.dylib
 *.dll
+*.lib
+*.obj
+*.ilk
 *.dSYM
 supported.*
 config.mk
@@ -15,6 +20,9 @@ langs.cfg
 .*.swp
 .*.swo
 *.un~
+*.pdb
+*.lib
+*.ilk
 binr/r2agent/r2agent
 binr/r2agent/r2agent.exe
 binr/rabin2/rabin2
@@ -38,13 +46,13 @@ binr/rasm2/rasm2.exe
 binr/rax2/rax2
 binr/rax2/rax2.exe
 binr/*/_CodeSignature/*
+build/*
 config-user.mk
 libr/bin/d/dll/dll
 libr/config.h
 libr/include/r_userconf.h
 libr/include/r_version.h
 libr/include/r_version.h.tmp
-shlr/grub/libgrubfs.lib
 shlr/java/out
 shlr/java/out.exe
 shlr/sdb/sdb
@@ -66,9 +74,14 @@ radare2-regressions
 radare2-w32-*
 radare2-regressions
 tags
+**/GPATH
+**/GRTAGS
+**/GTAGS
+**/.gdb_history
 .lvimrc
 .nconfig.tmp
 .ycm_extra_conf.py
 .ycm_extra_conf.pyc
 .kdev4/*
 *.kdev4
+radare2-*.zip

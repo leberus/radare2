@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2015 - nibble, pancake */
+/* radare - LGPL - Copyright 2009-2017 - nibble, pancake */
 
 #ifndef R2_ASM_H
 #define R2_ASM_H
@@ -111,6 +111,8 @@ typedef struct r_asm_t {
 	char *features;
 	int invhex; // invalid instructions displayed in hex
 	int pcalign;
+	int dataalign;
+	SdbHash *flags;
 } RAsm;
 
 typedef int (*RAsmModifyCallback)(RAsm *a, ut8 *buf, int field, ut64 val);
@@ -118,6 +120,8 @@ typedef int (*RAsmModifyCallback)(RAsm *a, ut8 *buf, int field, ut64 val);
 typedef struct r_asm_plugin_t {
 	const char *name;
 	const char *arch;
+	const char *author;
+	const char *version;
 	const char *cpus;
 	const char *desc;
 	const char *license;
@@ -209,7 +213,6 @@ extern RAsmPlugin r_asm_plugin_i8080;
 extern RAsmPlugin r_asm_plugin_m68k;
 extern RAsmPlugin r_asm_plugin_m68k_cs;
 extern RAsmPlugin r_asm_plugin_arc;
-extern RAsmPlugin r_asm_plugin_rar;
 extern RAsmPlugin r_asm_plugin_dcpu16;
 extern RAsmPlugin r_asm_plugin_8051;
 extern RAsmPlugin r_asm_plugin_tms320;
@@ -243,6 +246,9 @@ extern RAsmPlugin r_asm_plugin_xtensa;
 extern RAsmPlugin r_asm_plugin_tricore;
 extern RAsmPlugin r_asm_plugin_pic18c;
 extern RAsmPlugin r_asm_plugin_rsp;
+extern RAsmPlugin r_asm_plugin_wasm;
+extern RAsmPlugin r_asm_plugin_tms320c64x;
+
 #endif
 
 #ifdef __cplusplus

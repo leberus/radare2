@@ -256,8 +256,9 @@ static int cmd_meta_comment(RCore *core, const char *input) {
 		break;
 	case '.':
 		  {
+			  ut64 at = input[2]? r_num_math (core->num, input + 2): addr;
 			  char *comment = r_meta_get_string (
-					  core->anal, R_META_TYPE_COMMENT, addr);
+					  core->anal, R_META_TYPE_COMMENT, at);
 			  if (comment) {
 				  r_cons_println (comment);
 				  free (comment);
@@ -414,8 +415,21 @@ static int cmd_meta_hsdmf(RCore *core, const char *input) {
 
 	switch (input[1]) {
 	case '?':
-		eprintf ("See C?\n");
-		break;
+		switch (input[0]) {
+		case 'f':
+			r_cons_println(
+				"Usage: Cf[-] [sz] [fmt..] [@addr]\n\n"
+				"'sz' indicates the byte size taken up by struct.\n"
+				"'fmt' is a 'pf?' style format string. It controls only the display format.\n\n"
+				"You may wish to have 'sz' != sizeof(fmt) when you have a large struct\n"
+				"but have only identified specific fields in it. In that case, use 'fmt'\n"
+				"to show the fields you know about (perhaps using 'skip' fields), and 'sz'\n"
+				"to match the total struct size in mem.\n");
+			break;
+		default:
+			r_cons_println ("See C?");
+			break;
+		}
 	case '-':
 		switch (input[2]) {
 		case '*':
@@ -486,6 +500,10 @@ static int cmd_meta_hsdmf(RCore *core, const char *input) {
 								n = 32; //
 							}
 						}
+						//make sure we do not overflow on r_print_format
+						if (n > core->blocksize) {
+							n = core->blocksize;
+						}
 						int r = r_print_format (core->print, addr, core->block,
 							n, p + 1, 0, NULL, NULL);
 						if (r < 0) {
@@ -496,7 +514,7 @@ static int cmd_meta_hsdmf(RCore *core, const char *input) {
 						break;
 					}
 				} else if (type == 's') { //Cs
-					char tmp[256] = {0};
+					char tmp[256] = R_EMPTY;
 					int i, j, name_len = 0;
 					(void)r_core_read_at (core, addr, (ut8*)tmp, sizeof (tmp) - 3);
 					name_len = r_str_nlen_w (tmp, sizeof (tmp) - 3);
@@ -606,8 +624,8 @@ void r_comment_var_help(RCore *core, char type) {
 	case 'r':
 		r_core_cmd_help (core, help_reg);
 		break;
-	default:
-		r_cons_printf("See Cvb, Cvs and Cvr\n");
+	case '?':
+		r_cons_printf("See Cvb?, Cvs? and Cvr?\n");
 	}
 }
 
@@ -781,15 +799,16 @@ static int cmd_meta(void *data, const char *input) {
 				"CL", "[-][*] [file:line] [addr]", "show or add 'code line' information (bininfo)",
 				"CS", "[-][space]", "manage meta-spaces to filter comments, etc..",
 				"CC", "[?] [-] [comment-text] [@addr]", "add/remove comment",
+				"CC.", "[addr]", "show comment in current address",
 				"CC!", " [@addr]", "edit comment with $EDITOR",
 				"CCa", "[-at]|[at] [text] [@addr]", "add/remove comment at given address",
 				"CCu", " [comment-text] [@addr]", "add unique comment",
-				"Cv", "[?]", "add comments to args",
+				"Cv", "[bsr][?]", "add comments to args",
 				"Cs", "[?] [-] [size] [@addr]", "add string",
 				"Cz", "[@addr]", "add zero-terminated string",
 				"Ch", "[-] [size] [@addr]", "hide data",
 				"Cd", "[-] [size] [repeat] [@addr]", "hexdump data array (Cd 4 10 == dword [10])",
-				"Cf", "[-] [sz] [fmt..] [@addr]", "format memory (see pf?)",
+				"Cf", "[?][-] [sz] [0|cnt][fmt] [a0 a1...] [@addr]", "format memory (see pf?)",
 				"CF", "[sz] [fcn-sign..] [@addr]", "function signature",
 				"Cm", "[-] [sz] [fmt..] [@addr]", "magic parse (see pm?)",
 				NULL};

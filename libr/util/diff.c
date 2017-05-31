@@ -2,8 +2,6 @@
 
 #include <r_diff.h>
 
-//R_LIB_VERSION (r_diff);
-
 R_API RDiff *r_diff_new_from(ut64 off_a, ut64 off_b) {
 	RDiff *d = R_NEW0 (RDiff);
 	if (d) {
@@ -38,34 +36,36 @@ R_API int r_diff_set_delta(RDiff *d, int delta) {
 R_API int r_diff_buffers_static(RDiff *d, const ut8 *a, int la, const ut8 *b, int lb) {
 	int i, len;
 	int hit = 0;
-	la = R_ABS(la);
-	lb = R_ABS(lb);
+	la = R_ABS (la);
+	lb = R_ABS (lb);
 	if (la != lb) {
 	 	len = R_MIN(la, lb);
-		fprintf(stderr,
-			"Buffer truncated to %d bytes (%d not compared)\n",
-			len, R_ABS(lb-la));
+		eprintf ("Buffer truncated to %d bytes (%d not compared)\n", len, R_ABS(lb-la));
 	} else {
 		len = la;
 	}
-	for(i = 0; i<len; i++) {
-		if (a[i]!=b[i]) {
+	for (i = 0; i < len; i++) {
+		if (a[i] != b[i]) {
 			hit++;
 		} else {
-			if (hit>0) {
+			if (hit > 0) {
+				int ra = la - (i - hit);
+				int rb = lb - (i - hit);
 				struct r_diff_op_t o = {
-					.a_off = d->off_a+i-hit, .a_buf = a+i-hit, .a_len = la,
-					.b_off = d->off_b+i-hit, .b_buf = b+i-hit, .b_len = lb 
+					.a_off = d->off_a+i-hit, .a_buf = a+i-hit, .a_len = R_MIN (hit, ra),
+					.b_off = d->off_b+i-hit, .b_buf = b+i-hit, .b_len = R_MIN (hit, rb)
 				};
 				d->callback (d, d->user, &o);
 				hit = 0;
 			}
 		}
 	}
-	if (hit>0) {
+	if (hit > 0) {
+		int ra = la - (i - hit);
+		int rb = lb - (i - hit);
 		struct r_diff_op_t o = {
-			.a_off = d->off_a+i-hit, .a_buf = a+i-hit, .a_len = hit,
-			.b_off = d->off_b+i-hit, .b_buf = b+i-hit, .b_len = hit
+			.a_off = d->off_a+i-hit, .a_buf = a+i-hit, .a_len = R_MIN (hit, ra),
+			.b_off = d->off_b+i-hit, .b_buf = b+i-hit, .b_len = R_MIN (hit, rb)
 		};
 		d->callback (d, d->user, &o);
 		hit = 0;
@@ -285,16 +285,16 @@ R_API bool r_diff_buffers_distance_levenstein(RDiff *d, const ut8 *a, ut32 la, c
 	}
 	//Clean up output on loop exit (purely aesthetic)
 	if (verbose) {
-		eprintf ("\rProcessing %d of %d (loops=%llu)\n", i, aLen,loops);
+		eprintf ("\rProcessing %d of %d (loops=%"PFMT64d")\n", i, aLen,loops);
 	}
 	if (distance) {
 		// the final distance is the last byte we processed in the inner loop.
 		// v0 is used instead of v1 because we switched the pointers before exiting the outer loop
 		*distance = v0[stop];
-		if (similarity) {
-			double diff = (double) (*distance) / (double) (R_MAX (aLen, bLen));
-			*similarity = (double)1 - diff;
-		}
+	}
+	if (similarity) {
+		double diff = (double) (v0[stop]) / (double) (R_MAX (aLen, bLen));
+		*similarity = (double)1 - diff;
 	}
 	free (v0);
 	free (v1);

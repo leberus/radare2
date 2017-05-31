@@ -3,6 +3,7 @@
 #include <r_asm.h>
 #include <r_debug.h>
 #include <libgdbr.h>
+#include <gdbclient/commands.h>
 
 typedef struct {
 	libgdbr_t desc;
@@ -733,7 +734,15 @@ static int r_debug_gdb_breakpoint (RBreakpointItem *bp, int set, void *user) {
 	return !ret;
 }
 
-struct r_debug_plugin_t r_debug_plugin_gdb = {
+static bool r_debug_gdb_kill(RDebug *dbg, int pid, int tid, int sig) {
+	// TODO kill based on pid and signal
+	if (sig != 0) {
+		return gdbr_kill (desc);
+	}
+	return true;
+}
+
+RDebugPlugin r_debug_plugin_gdb = {
 	.name = "gdb",
 	/* TODO: Add support for more architectures here */
 	.license = "LGPL3",
@@ -750,6 +759,7 @@ struct r_debug_plugin_t r_debug_plugin_gdb = {
 	.reg_read = &r_debug_gdb_reg_read,
 	.reg_write = &r_debug_gdb_reg_write,
 	.reg_profile = (void *)r_debug_gdb_reg_profile,
+	.kill = &r_debug_gdb_kill,
 	//.bp_write = &r_debug_gdb_bp_write,
 	//.bp_read = &r_debug_gdb_bp_read,
 };

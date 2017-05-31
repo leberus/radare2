@@ -47,6 +47,10 @@
 #define SHIFTTYPE(x) insn->detail->arm.operands[x].shift.type
 #define SHIFTVALUE(x) insn->detail->arm.operands[x].shift.value
 
+#define ISWRITEBACK64() (insn->detail->arm64.writeback == true)
+#define ISPREINDEX64() ((OPCOUNT64() == 3) && (ISMEM64(2)) && (ISWRITEBACK64()))
+#define ISPOSTINDEX64() ((OPCOUNT64() == 4) && (ISIMM64(3)) && (ISWRITEBACK64()))
+
 static const ut64 bitmask_by_width[] = {
 	0x1, 0x3, 0x7, 0xf, 0x1f, 0x3f, 0x7f, 0xff, 0x1ff, 0x3ff, 0x7ff,
 	0xfff, 0x1fff, 0x3fff, 0x7fff, 0xffff, 0x1ffff, 0x3ffff, 0x7ffff,
@@ -61,15 +65,547 @@ static const ut64 bitmask_by_width[] = {
 	0xfffffffffffffffLL, 0x1fffffffffffffffLL, 0x3fffffffffffffffLL, 0x7fffffffffffffffLL, 0xffffffffffffffffLL
 };
 
+static const char *shift_type_name(arm_shifter type) {
+	switch (type) {
+	case ARM_SFT_ASR:
+		return "asr";
+	case ARM_SFT_LSL:
+		return "lsl";
+	case ARM_SFT_LSR:
+		return "lsr";
+	case ARM_SFT_ROR:
+		return "ror";
+	case ARM_SFT_RRX:
+		return "rrx";
+	case ARM_SFT_ASR_REG:
+		return "asr_reg";
+	case ARM_SFT_LSL_REG:
+		return "lsl_reg";
+	case ARM_SFT_LSR_REG:
+		return "lsr_reg";
+	case ARM_SFT_ROR_REG:
+		return "ror_reg";
+	case ARM_SFT_RRX_REG:
+		return "rrx_reg";
+	default:
+		return "";
+	}
+}
+
+static const char *vector_data_type_name(arm_vectordata_type type) {
+	switch (type) {
+	case ARM_VECTORDATA_I8:
+		return "i8";
+	case ARM_VECTORDATA_I16:
+		return "i16";
+	case ARM_VECTORDATA_I32:
+		return "i32";
+	case ARM_VECTORDATA_I64:
+		return "i64";
+	case ARM_VECTORDATA_S8:
+		return "s8";
+	case ARM_VECTORDATA_S16:
+		return "s16";
+	case ARM_VECTORDATA_S32:
+		return "s32";
+	case ARM_VECTORDATA_S64:
+		return "s64";
+	case ARM_VECTORDATA_U8:
+		return "u8";
+	case ARM_VECTORDATA_U16:
+		return "u16";
+	case ARM_VECTORDATA_U32:
+		return "u32";
+	case ARM_VECTORDATA_U64:
+		return "u64";
+	case ARM_VECTORDATA_P8:
+		return "p8";
+	case ARM_VECTORDATA_F32:
+		return "f32";
+	case ARM_VECTORDATA_F64:
+		return "f64";
+	case ARM_VECTORDATA_F16F64:
+		return "f16.f64";
+	case ARM_VECTORDATA_F64F16:
+		return "f64.f16";
+	case ARM_VECTORDATA_F32F16:
+		return "f32.f16";
+	case ARM_VECTORDATA_F16F32:
+		return "f16.f32";
+	case ARM_VECTORDATA_F64F32:
+		return "f64.f32";
+	case ARM_VECTORDATA_F32F64:
+		return "f32.f64";
+	case ARM_VECTORDATA_S32F32:
+		return "s32.f32";
+	case ARM_VECTORDATA_U32F32:
+		return "u32.f32";
+	case ARM_VECTORDATA_F32S32:
+		return "f32.s32";
+	case ARM_VECTORDATA_F32U32:
+		return "f32.u32";
+	case ARM_VECTORDATA_F64S16:
+		return "f64.s16";
+	case ARM_VECTORDATA_F32S16:
+		return "f32.s16";
+	case ARM_VECTORDATA_F64S32:
+		return "f64.s32";
+	case ARM_VECTORDATA_S16F64:
+		return "s16.f64";
+	case ARM_VECTORDATA_S16F32:
+		return "s16.f64";
+	case ARM_VECTORDATA_S32F64:
+		return "s32.f64";
+	case ARM_VECTORDATA_U16F64:
+		return "u16.f64";
+	case ARM_VECTORDATA_U16F32:
+		return "u16.f32";
+	case ARM_VECTORDATA_U32F64:
+		return "u32.f64";
+	case ARM_VECTORDATA_F64U16:
+		return "f64.u16";
+	case ARM_VECTORDATA_F32U16:
+		return "f32.u16";
+	case ARM_VECTORDATA_F64U32:
+		return "f64.u32";
+	default:
+		return "";
+	}
+}
+
+static const char *cc_name(arm_cc cc) {
+	switch (cc) {
+	case ARM_CC_EQ: // Equal                      Equal
+		return "eq";
+	case ARM_CC_NE: // Not equal                  Not equal, or unordered
+		return "ne";
+	case ARM_CC_HS: // Carry set                  >, ==, or unordered
+		return "hs";
+	case ARM_CC_LO: // Carry clear                Less than
+		return "lo";
+	case ARM_CC_MI: // Minus, negative            Less than
+		return "mi";
+	case ARM_CC_PL: // Plus, positive or zero     >, ==, or unordered
+		return "pl";
+	case ARM_CC_VS: // Overflow                   Unordered
+		return "vs";
+	case ARM_CC_VC: // No overflow                Not unordered
+		return "vc";
+	case ARM_CC_HI: // Unsigned higher            Greater than, or unordered
+		return "hi";
+	case ARM_CC_LS: // Unsigned lower or same     Less than or equal
+		return "ls";
+	case ARM_CC_GE: // Greater than or equal      Greater than or equal
+		return "ge";
+	case ARM_CC_LT: // Less than                  Less than, or unordered
+		return "lt";
+	case ARM_CC_GT: // Greater than               Greater than
+		return "gt";
+	case ARM_CC_LE: // Less than or equal         <, ==, or unordered
+		return "le";
+	default:
+		return "";
+	}
+}
+
+static void opex(RStrBuf *buf, csh handle, cs_insn *insn) {
+	int i;
+	r_strbuf_init (buf);
+	r_strbuf_append (buf, "{");
+	cs_arm *x = &insn->detail->arm;
+	r_strbuf_append (buf, "\"operands\":[");
+	for (i = 0; i < x->op_count; i++) {
+		cs_arm_op *op = &x->operands[i];
+		if (i > 0) {
+			r_strbuf_append (buf, ",");
+		}
+		r_strbuf_append (buf, "{");
+		switch (op->type) {
+		case ARM_OP_REG:
+			r_strbuf_append (buf, "\"type\":\"reg\"");
+			r_strbuf_appendf (buf, ",\"value\":\"%s\"", cs_reg_name (handle, op->reg));
+			break;
+		case ARM_OP_IMM:
+			r_strbuf_append (buf, "\"type\":\"imm\"");
+			r_strbuf_appendf (buf, ",\"value\":%"PFMT64d, op->imm);
+			break;
+		case ARM_OP_MEM:
+			r_strbuf_append (buf, "\"type\":\"mem\"");
+			if (op->mem.base != ARM_REG_INVALID) {
+				r_strbuf_appendf (buf, ",\"base\":\"%s\"", cs_reg_name (handle, op->mem.base));
+			}
+			if (op->mem.index != ARM_REG_INVALID) {
+				r_strbuf_appendf (buf, ",\"index\":\"%s\"", cs_reg_name (handle, op->mem.index));
+			}
+			r_strbuf_appendf (buf, ",\"scale\":%d", op->mem.scale);
+			r_strbuf_appendf (buf, ",\"disp\":%d", op->mem.disp);
+			break;
+		case ARM_OP_FP:
+			r_strbuf_append (buf, "\"type\":\"fp\"");
+			r_strbuf_appendf (buf, ",\"value\":%lf", op->fp);
+			break;
+		case ARM_OP_CIMM:
+			r_strbuf_append (buf, "\"type\":\"cimm\"");
+			r_strbuf_appendf (buf, ",\"value\":%"PFMT64d, op->imm);
+			break;
+		case ARM_OP_PIMM:
+			r_strbuf_append (buf, "\"type\":\"pimm\"");
+			r_strbuf_appendf (buf, ",\"value\":%"PFMT64d, op->imm);
+			break;
+		case ARM_OP_SETEND:
+			r_strbuf_append (buf, "\"type\":\"setend\"");
+			switch (op->setend) {
+			case ARM_SETEND_BE:
+				r_strbuf_append (buf, ",\"value\":\"be\"");
+				break;
+			case ARM_SETEND_LE:
+				r_strbuf_append (buf, ",\"value\":\"le\"");
+				break;
+			default:
+				r_strbuf_append (buf, ",\"value\":\"invalid\"");
+				break;
+			}
+			break;
+		case ARM_OP_SYSREG:
+			r_strbuf_append (buf, "\"type\":\"sysreg\"");
+			r_strbuf_appendf (buf, ",\"value\":\"%s\"", cs_reg_name (handle, op->reg));
+			break;
+		default:
+			r_strbuf_append (buf, ",\"type\":\"invalid\"");
+			break;
+		}
+		if (op->shift.type != ARM_SFT_INVALID) {
+			r_strbuf_append (buf, ",\"shift\":{");
+			switch (op->shift.type) {
+			case ARM_SFT_ASR:
+			case ARM_SFT_LSL:
+			case ARM_SFT_LSR:
+			case ARM_SFT_ROR:
+			case ARM_SFT_RRX:
+				r_strbuf_appendf (buf, "\"type\":\"%s\"", shift_type_name (op->shift.type));
+				r_strbuf_appendf (buf, ",\"value\":\"%u\"", op->shift.value);
+				break;
+			case ARM_SFT_ASR_REG:
+			case ARM_SFT_LSL_REG:
+			case ARM_SFT_LSR_REG:
+			case ARM_SFT_ROR_REG:
+			case ARM_SFT_RRX_REG:
+				r_strbuf_appendf (buf, "\"type\":\"%s\"", shift_type_name (op->shift.type));
+				r_strbuf_appendf (buf, ",\"value\":\"%x\"", cs_reg_name (handle, op->shift.value));
+				break;
+			default:
+				break;
+			}
+			r_strbuf_append (buf, "}");
+		}
+		if (op->vector_index != -1) {
+			r_strbuf_appendf (buf, ",\"vector_index\":\"%d\"", op->vector_index);
+		}
+		if (op->subtracted) {
+			r_strbuf_append (buf, ",\"subtracted\":true");
+		}
+		r_strbuf_append (buf, "}");
+	}
+	r_strbuf_append (buf, "]");
+	if (x->usermode) {
+		r_strbuf_append (buf, ",\"usermode\":true");
+	}
+	if (x->update_flags) {
+		r_strbuf_append (buf, ",\"update_flags\":true");
+	}
+	if (x->writeback) {
+		r_strbuf_append (buf, ",\"writeback\":true");
+	}
+	if (x->vector_size) {
+		r_strbuf_appendf (buf, ",\"vector_size\":%d", x->vector_size);
+	}
+	if (x->vector_data != ARM_VECTORDATA_INVALID) {
+		r_strbuf_appendf (buf, ",\"vector_data\":\"%s\"", vector_data_type_name (x->vector_data));
+	}
+	if (x->cps_mode != ARM_CPSMODE_INVALID) {
+		r_strbuf_appendf (buf, ",\"cps_mode\":%d", x->cps_mode);
+	}
+	if (x->cps_flag != ARM_CPSFLAG_INVALID) {
+		r_strbuf_appendf (buf, ",\"cps_flag\":%d", x->cps_flag);
+	}
+	if (x->cc != ARM_CC_INVALID && x->cc != ARM_CC_AL) {
+		r_strbuf_appendf (buf, ",\"cc\":\"%s\"", cc_name (x->cc));
+	}
+	if (x->mem_barrier != ARM_MB_INVALID) {
+		r_strbuf_appendf (buf, ",\"mem_barrier\":%d", x->mem_barrier - 1);
+	}
+	r_strbuf_append (buf, "}");
+}
+
+static int arm64_reg_width(int reg) {
+	switch (reg) {
+		case ARM64_REG_W0:
+		case ARM64_REG_W1:
+		case ARM64_REG_W2:
+		case ARM64_REG_W3:
+		case ARM64_REG_W4:
+		case ARM64_REG_W5:
+		case ARM64_REG_W6:
+		case ARM64_REG_W7:
+		case ARM64_REG_W8:
+		case ARM64_REG_W9:
+		case ARM64_REG_W10:
+		case ARM64_REG_W11:
+		case ARM64_REG_W12:
+		case ARM64_REG_W13:
+		case ARM64_REG_W14:
+		case ARM64_REG_W15:
+		case ARM64_REG_W16:
+		case ARM64_REG_W17:
+		case ARM64_REG_W18:
+		case ARM64_REG_W19:
+		case ARM64_REG_W20:
+		case ARM64_REG_W21:
+		case ARM64_REG_W22:
+		case ARM64_REG_W23:
+		case ARM64_REG_W24:
+		case ARM64_REG_W25:
+		case ARM64_REG_W26:
+		case ARM64_REG_W27:
+		case ARM64_REG_W28:
+		case ARM64_REG_W29:
+		case ARM64_REG_W30:
+		return 32;
+		break;
+	default:
+		break;
+	}
+	return 64;
+}
+
+static const char *cc_name64(arm64_cc cc) {
+	switch (cc) {
+	case ARM64_CC_EQ: // Equal
+		return "eq";
+	case ARM64_CC_NE: // Not equal:                 Not equal, or unordered
+		return "ne";
+	case ARM64_CC_HS: // Unsigned higher or same:   >, ==, or unordered
+		return "hs";
+	case ARM64_CC_LO: // Unsigned lower or same:    Less than
+		return "lo";
+	case ARM64_CC_MI: // Minus, negative:           Less than
+		return "mi";
+	case ARM64_CC_PL: // Plus, positive or zero:    >, ==, or unordered
+		return "pl";
+	case ARM64_CC_VS: // Overflow:                  Unordered
+		return "vs";
+	case ARM64_CC_VC: // No overflow:               Ordered
+		return "vc";
+	case ARM64_CC_HI: // Unsigned higher:           Greater than, or unordered
+		return "hi";
+	case ARM64_CC_LS: // Unsigned lower or same:    Less than or equal
+		return "ls";
+	case ARM64_CC_GE: // Greater than or equal:     Greater than or equal
+		return "ge";
+	case ARM64_CC_LT: // Less than:                 Less than, or unordered
+		return "lt";
+	case ARM64_CC_GT: // Signed greater than:       Greater than
+		return "gt";
+	case ARM64_CC_LE: // Signed less than or equal: <, ==, or unordered
+		return "le";
+	default:
+		return "";
+	}
+}
+
+static const char *extender_name(arm64_extender extender) {
+	switch (extender) {
+	case ARM64_EXT_UXTB:
+		return "uxtb";
+	case ARM64_EXT_UXTH:
+		return "uxth";
+	case ARM64_EXT_UXTW:
+		return "uxtw";
+	case ARM64_EXT_UXTX:
+		return "uxtx";
+	case ARM64_EXT_SXTB:
+		return "sxtb";
+	case ARM64_EXT_SXTH:
+		return "sxth";
+	case ARM64_EXT_SXTW:
+		return "sxtw";
+	case ARM64_EXT_SXTX:
+		return "sxtx";
+	default:
+		return "";
+	}
+}
+
+static const char *vas_name(arm64_vas vas) {
+	switch (vas) {
+	case ARM64_VAS_8B:
+		return "8b";
+	case ARM64_VAS_16B:
+		return "16b";
+	case ARM64_VAS_4H:
+		return "4h";
+	case ARM64_VAS_8H:
+		return "8h";
+	case ARM64_VAS_2S:
+		return "2s";
+	case ARM64_VAS_4S:
+		return "4s";
+	case ARM64_VAS_1D:
+		return "1d";
+	case ARM64_VAS_2D:
+		return "2d";
+	case ARM64_VAS_1Q:
+		return "1q";
+	default:
+		return "";
+	}
+}
+
+static const char *vess_name(arm64_vess vess) {
+	switch (vess) {
+	case ARM64_VESS_B:
+		return "b";
+	case ARM64_VESS_H:
+		return "h";
+	case ARM64_VESS_S:
+		return "s";
+	case ARM64_VESS_D:
+		return "d";
+	default:
+		return "";
+	}
+}
+
+static void opex64(RStrBuf *buf, csh handle, cs_insn *insn) {
+	int i;
+	r_strbuf_init (buf);
+	r_strbuf_append (buf, "{");
+	cs_arm64 *x = &insn->detail->arm64;
+	r_strbuf_append (buf, "\"operands\":[");
+	for (i = 0; i < x->op_count; i++) {
+		cs_arm64_op *op = &x->operands[i];
+		if (i > 0) {
+			r_strbuf_append (buf, ",");
+		}
+		r_strbuf_append (buf, "{");
+		switch (op->type) {
+		case ARM64_OP_REG:
+			r_strbuf_append (buf, "\"type\":\"reg\"");
+			r_strbuf_appendf (buf, ",\"value\":\"%s\"", cs_reg_name (handle, op->reg));
+			break;
+		case ARM64_OP_REG_MRS:
+			r_strbuf_append (buf, "\"type\":\"reg_mrs\"");
+			// TODO value
+			break;
+		case ARM64_OP_REG_MSR:
+			r_strbuf_append (buf, "\"type\":\"reg_msr\"");
+			// TODO value
+			break;
+		case ARM64_OP_IMM:
+			r_strbuf_append (buf, "\"type\":\"imm\"");
+			r_strbuf_appendf (buf, ",\"value\":%"PFMT64d, op->imm);
+			break;
+		case ARM64_OP_MEM:
+			r_strbuf_append (buf, "\"type\":\"mem\"");
+			if (op->mem.base != ARM64_REG_INVALID) {
+				r_strbuf_appendf (buf, ",\"base\":\"%s\"", cs_reg_name (handle, op->mem.base));
+			}
+			if (op->mem.index != ARM64_REG_INVALID) {
+				r_strbuf_appendf (buf, ",\"index\":\"%s\"", cs_reg_name (handle, op->mem.index));
+			}
+			r_strbuf_appendf (buf, ",\"disp\":%d", op->mem.disp);
+			break;
+		case ARM64_OP_FP:
+			r_strbuf_append (buf, "\"type\":\"fp\"");
+			r_strbuf_appendf (buf, ",\"value\":%lf", op->fp);
+			break;
+		case ARM64_OP_CIMM:
+			r_strbuf_append (buf, "\"type\":\"cimm\"");
+			r_strbuf_appendf (buf, ",\"value\":%"PFMT64d, op->imm);
+			break;
+		case ARM64_OP_PSTATE:
+			r_strbuf_append (buf, "\"type\":\"pstate\"");
+			r_strbuf_appendf (buf, ",\"value\":%x", op->pstate);
+			break;
+		case ARM64_OP_SYS:
+			r_strbuf_append (buf, "\"type\":\"sys\"");
+			r_strbuf_appendf (buf, ",\"value\":%u", op->sys);
+			break;
+		case ARM64_OP_PREFETCH:
+			r_strbuf_append (buf, "\"type\":\"prefetch\"");
+			r_strbuf_appendf (buf, ",\"value\":%x", op->prefetch - 1);
+			break;
+		case ARM64_OP_BARRIER:
+			r_strbuf_append (buf, "\"type\":\"prefetch\"");
+			r_strbuf_appendf (buf, ",\"value\":%x", op->barrier - 1);
+			break;
+		default:
+			r_strbuf_append (buf, ",\"type\":\"invalid\"");
+			break;
+		}
+		if (op->shift.type != ARM64_SFT_INVALID) {
+			r_strbuf_append (buf, ",\"shift\":{");
+			switch (op->shift.type) {
+			case ARM64_SFT_LSL:
+				r_strbuf_append (buf, "\"type\":\"lsl\"");
+				break;
+			case ARM64_SFT_MSL:
+				r_strbuf_append (buf, "\"type\":\"msl\"");
+				break;
+			case ARM64_SFT_LSR:
+				r_strbuf_append (buf, "\"type\":\"lsr\"");
+				break;
+			case ARM64_SFT_ASR:
+				r_strbuf_append (buf, "\"type\":\"asr\"");
+				break;
+			case ARM64_SFT_ROR:
+				r_strbuf_append (buf, "\"type\":\"ror\"");
+				break;
+			default:
+				break;
+			}
+			r_strbuf_appendf (buf, ",\"value\":\"%u\"", op->shift.value);
+			r_strbuf_append (buf, "}");
+		}
+		if (op->ext != ARM64_EXT_INVALID) {
+			r_strbuf_appendf (buf, ",\"ext\":\"%s\"", extender_name (op->ext));
+		}
+		if (op->vector_index != -1) {
+			r_strbuf_appendf (buf, ",\"vector_index\":\"%d\"", op->vector_index);
+		}
+		if (op->vas != ARM64_VAS_INVALID) {
+			r_strbuf_appendf (buf, ",\"vas\":\"%s\"", vas_name (op->vas));
+		}
+		if (op->vess != ARM64_VESS_INVALID) {
+			r_strbuf_appendf (buf, ",\"vess\":\"%s\"", vess_name (op->vess));
+		}
+		r_strbuf_append (buf, "}");
+	}
+	r_strbuf_append (buf, "]");
+	if (x->update_flags) {
+		r_strbuf_append (buf, ",\"update_flags\":true");
+	}
+	if (x->writeback) {
+		r_strbuf_append (buf, ",\"writeback\":true");
+	}
+	if (x->cc != ARM64_CC_INVALID && x->cc != ARM64_CC_AL && x->cc != ARM64_CC_NV) {
+		r_strbuf_appendf (buf, ",\"cc\":\"%s\"", cc_name64 (x->cc));
+	}
+	r_strbuf_append (buf, "}");
+}
+
 static const char *decode_shift(arm_shifter shift) {
 	static const char *E_OP_SR = ">>";
 	static const char *E_OP_SL = "<<";
 	static const char *E_OP_RR = ">>>";
+	static const char *E_OP_ASR = ">>>>";
 	static const char *E_OP_VOID = "";
 
 	switch (shift) {
 	case ARM_SFT_ASR:
 	case ARM_SFT_ASR_REG:
+		return E_OP_ASR;
+
 	case ARM_SFT_LSR:
 	case ARM_SFT_LSR_REG:
 		return E_OP_SR;
@@ -136,6 +672,82 @@ static int regsize64(cs_insn *insn, int n) {
 }
 
 #define REGSIZE64(x) regsize64 (insn, x)
+
+// return postfix
+const char* arm_prefix_cond(RAnalOp *op, int cond_type)
+{
+	const char *close_cond[3];
+	close_cond[0] = "\0";
+	close_cond[1] = ",}\0";
+	close_cond[2] = ",},}\0";
+	int close_type = 0;
+	switch (cond_type) {
+	case ARM_CC_EQ:
+		close_type = 1;
+		r_strbuf_setf (&op->esil, "zf,?{,");
+		break;
+	case ARM_CC_NE:
+		close_type = 1;
+		r_strbuf_setf (&op->esil, "zf,!,?{,");
+		break;
+	case ARM_CC_HS:
+		close_type = 1;
+		r_strbuf_setf (&op->esil, "cf,?{,");
+		break;
+	case ARM_CC_LO:
+		close_type = 1;
+		r_strbuf_setf (&op->esil, "cf,!,?{,");
+		break;
+	case ARM_CC_MI:
+		close_type = 1;
+		r_strbuf_setf (&op->esil, "nf,?{,");
+		break;
+	case ARM_CC_PL:
+		close_type = 1;
+		r_strbuf_setf (&op->esil, "nf,!,?{,");
+		break;
+	case ARM_CC_VS:
+		close_type = 1;
+		r_strbuf_setf (&op->esil, "vf,?{,");
+		break;
+	case ARM_CC_VC:
+		close_type = 1;
+		r_strbuf_setf (&op->esil, "vf,!,?{,");
+		break;
+	case ARM_CC_HI:
+		close_type = 2;
+		r_strbuf_setf (&op->esil, "cf,?{,zf,!,?{,");
+		break;
+	case ARM_CC_LS:
+		close_type = 2;
+		r_strbuf_setf (&op->esil, "cf,!,?{,zf,?{,");
+		break;
+	case ARM_CC_GE:
+		close_type = 1;
+		r_strbuf_setf (&op->esil, "nf,vf,==,?{,");
+		break;
+	case ARM_CC_LT:
+		close_type = 1;
+		r_strbuf_setf (&op->esil, "nf,vf,==,!,?{,");
+		break;
+	case ARM_CC_GT:
+		// zf == 0 && nf == vf
+		close_type = 2;
+		r_strbuf_setf (&op->esil, "zf,!,?{,nf,vf,==,?{,");
+		break;
+	case ARM_CC_LE:
+		// zf == 1 && nf != vf
+		close_type = 2;
+		r_strbuf_setf (&op->esil, "zf,?{,nf,vf,==,!,?{,");
+		break;
+	case ARM_CC_AL:
+		// always executed
+		break;
+	default:
+		break;
+	}
+	return close_cond[close_type];
+}
 
 /* arm64 */
 
@@ -249,8 +861,14 @@ static void arm64math(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len,
 }
 
 static int analop64_esil(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, csh *handle, cs_insn *insn) {
+
+	const char *postfix = NULL;
+	opex64 (&op->opex, *handle, insn);
+
 	r_strbuf_init (&op->esil);
 	r_strbuf_set (&op->esil, "");
+
+	postfix = arm_prefix_cond (op, insn->detail->arm64.cc);
 
 	switch (insn->id) {
 	case ARM64_INS_REV: {
@@ -269,8 +887,12 @@ static int analop64_esil(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int l
 			"%"PFMT64d",%s,=", IMM64(1), REG64(0));
 		break;
 	case ARM64_INS_MADD:
-		r_strbuf_setf (&op->esil,
-			"%s,%s,*,%s,+,%s,=",REG64(2),REG64(1),REG64(3), REG64(0));
+		r_strbuf_setf (&op->esil, "%s,%s,*,%s,+,%s,=",
+			REG64 (2), REG64 (1), REG64 (3), REG64 (0));
+		break;
+	case ARM64_INS_MSUB:
+		r_strbuf_setf (&op->esil, "%s,%s,*,%s,-,%s,=",
+			REG64 (2), REG64 (1), REG64 (3), REG64 (0));
 		break;
 	case ARM64_INS_DMB:
 	case ARM64_INS_DSB:
@@ -284,7 +906,7 @@ static int analop64_esil(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int l
 		break;
 	case ARM64_INS_SUB:
 		op->cycles = 1;
-		op->type = R_ANAL_OP_TYPE_ADD;
+		op->type = R_ANAL_OP_TYPE_SUB;
 		OPCALL("-");
 		break;
 	case ARM64_INS_MUL:
@@ -321,6 +943,11 @@ static int analop64_esil(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int l
 		op->type = R_ANAL_OP_TYPE_SHL;
 		OPCALL("<<");
 		break;
+	case ARM64_INS_ROR:
+		op->cycles = 1;
+		op->type = R_ANAL_OP_TYPE_ROR;
+		OPCALL(">>>");
+		break;
 	case ARM64_INS_STURB: // sturb wzr, [x9, 0xffffffffffffffff]
 		// TODO
 		break;
@@ -338,27 +965,16 @@ static int analop64_esil(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int l
 		r_strbuf_setf (&op->esil, "%s,pc,=", REG64(0));
 		break;
 	case ARM64_INS_B:
-		switch (insn->detail->arm.cc) {
-		case 0:
-			r_strbuf_setf (&op->esil, "%"PFMT64d",pc,=", (ut64)addr + IMM64 (0));
-			break;
-		case ARM_CC_EQ:
-			r_strbuf_setf (&op->esil, "zf,{,%"PFMT64d",pc,=,}", (ut64)addr + IMM64 (0));
-			break;
-		case ARM_CC_NE:
-			r_strbuf_setf (&op->esil, "zf,!,{,%"PFMT64d",pc,=,}", (ut64)addr + IMM64 (0));
-			break;
-		default:
-			//TODO
-			break;
-		}
+		/* capstone precompute resulting address, using PC + IMM */
+		r_strbuf_appendf (&op->esil, "%"PFMT64d",pc,=", IMM64 (0));
+		// Account for conditionals
+		r_strbuf_appendf (&op->esil, "%s", postfix);
 		break;
 	case ARM64_INS_BL:
-		r_strbuf_setf (&op->esil, "pc,lr,=,%"PFMT64d",pc,=", addr + IMM64 (0));
+		r_strbuf_setf (&op->esil, "pc,lr,=,%"PFMT64d",pc,=", IMM64 (0));
 		break;
 	case ARM64_INS_BLR:
-		// XXX
-		r_strbuf_setf (&op->esil, "pc,lr,=,%"PFMT64d",pc,=", IMM64 (0));
+		r_strbuf_setf (&op->esil, "pc,lr,=,%s,pc,=", REG64 (0));
 		break;
 	case ARM64_INS_LDUR:
 	case ARM64_INS_LDR:
@@ -432,14 +1048,25 @@ static int analop64_esil(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int l
 	case ARM64_INS_CMP: // cmp w8, 0xd
 	case ARM64_INS_CMN: // cmp w8, 0xd
 		// update esil, cpu flags
-		r_strbuf_setf (&op->esil, "%"PFMT64d",%s,==,$z,zf,=", IMM64(1), REG64(0));
+		if (ISIMM64(1)) {
+			r_strbuf_setf (&op->esil, "%"PFMT64d",%s,-,$z,zf,=,$s,nf,=,$b%d,cf,=,$o,vf,=", IMM64(1), REG64(0), arm64_reg_width(REGID64(0)));
+		} else {
+			// cmp w10, w11
+			r_strbuf_setf (&op->esil, "%s,%s,-,$z,zf,=,$s,nf,=,$b%d,cf,=,$o,vf,=", REG64(1), REG64(0), arm64_reg_width(REGID64(0)));
+		}
 		break;
 	case ARM64_INS_FCSEL:
 	case ARM64_INS_CSEL: // CSEL w8, w13, w14, eq
-		// TODO: w8 = eq? w13: w14
-		// COND64(4) { ARM64_CC_EQ, NE, HS, ...
-		r_strbuf_setf (&op->esil, "$z,?{,%s,}{,%s,},%s,=",
-			REG64(1), REG64(2), REG64(0));
+		r_strbuf_appendf(&op->esil, "%s,%s,=,BREAK", REG64(1), REG64(0));
+		r_strbuf_appendf(&op->esil, "%s,%s,%s,=", postfix, REG64(2), REG64(0));
+		break;
+	case ARM64_INS_CSET: // cset w8, eq
+		r_strbuf_appendf (&op->esil, "1,%s,=,BREAK", REG64(0));
+		r_strbuf_appendf (&op->esil, "%s,0,%s,=", postfix, REG64(0));
+		break;
+	case ARM64_INS_CINC: // cinc w10, w20, eq
+		r_strbuf_appendf (&op->esil, "1,%s,+,%s,=,BREAK", REG64(1), REG64(0));
+		r_strbuf_appendf (&op->esil, "%s,%s,%s,=", postfix, REG64(1), REG64(0));
 		break;
 	case ARM64_INS_STRB:
 		r_strbuf_setf (&op->esil, "%s,%s,%"PFMT64d",+,=[1]",
@@ -479,21 +1106,40 @@ static int analop64_esil(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int l
 		r_strbuf_setf (&op->esil, "%d,1,<<=,%s,&,?{,%"PFMT64d",pc,=,}",
 			IMM64(1), REG64(0), IMM64(2));
 		break;
-	case ARM64_INS_STP: // str x6, x7, [x6,0xf90]
+	case ARM64_INS_STP: // stp x6, x7, [x6,0xf90]
 		{
 		int disp = (int)MEMDISP64(2);
 		char sign = disp>=0?'+':'-';
 		ut64 abs = disp>=0? MEMDISP64(2): -MEMDISP64(2);
-		r_strbuf_setf (&op->esil,
-			"%s,%s,%"PFMT64d",%c,=[],"
-			"%s,%s,%"PFMT64d",%c,%d,+,=[]",
-			REG64(0), MEMBASE64(2), abs, sign,
-			REG64(1), MEMBASE64(2), abs, sign, 8);
+		// Pre-index case
+		if (ISPREINDEX64()) {
+			// "stp x2, x3, [x8, 0x20]
+			// "32,x8,+=,x2,x8,=[],x3,x8,8,+,=[]",
+			r_strbuf_setf(&op->esil,
+					"%d,%s,%c=,%s,%s,=[],%s,%s,8,+,=[]",
+					abs, MEMBASE64(2), sign,
+					REG64(0), MEMBASE64(2),
+					REG64(1), MEMBASE64(2));
+		// Post-index case
+		} else if (ISPOSTINDEX64()) {
+			int val = IMM64(3);
+			sign = val>=0?'+':'-';
+			abs = val>=0? val: -val;
+			// "stp x4, x5, [x8], 0x10"
+			// "x4,x8,=[],x5,x8,8,+,=[],16,x8,+="
+			r_strbuf_setf(&op->esil,
+					"%s,%s,=[],%s,%s,8,+,=[],%d,%s,%c=",
+					REG64(0), MEMBASE64(2),
+					REG64(1), MEMBASE64(2),
+					abs, MEMBASE64(2), sign);
+		// Everything else
+		} else {
+			r_strbuf_setf (&op->esil,
+					"%s,%s,%"PFMT64d",%c,=[],"
+					"%s,%s,%"PFMT64d",%c,%d,+,=[]",
+					REG64(0), MEMBASE64(2), abs, sign,
+					REG64(1), MEMBASE64(2), abs, sign, 8);
 		}
-		if (!strcmp ("sp", MEMBASE64(2))) {
-			op->stackop = R_ANAL_STACK_SET;
-			op->stackptr = 0;
-			op->ptr = -MEMDISP64(2);
 		}
 		break;
 	case ARM64_INS_LDP: // ldp x29, x30, [sp], 0x10
@@ -501,16 +1147,35 @@ static int analop64_esil(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int l
 		int disp = (int)MEMDISP64(2);
 		char sign = disp>=0?'+':'-';
 		ut64 abs = disp>=0? MEMDISP64(2): -MEMDISP64(2);
-		r_strbuf_setf (&op->esil,
-			"%s,%s,%"PFMT64d",%c,=[],"
-			"%s,%s,%"PFMT64d",%c,%d,+,=[]",
-			REG64(0), MEMBASE64(2), abs, sign,
-			REG64(1), MEMBASE64(2), abs, sign, 8);
+		// Pre-index case
+		// x2,x8,32,+,=[],x3,x8,32,+,8,+,=[]
+		if (ISPREINDEX64()) {
+			// "ldp x0, x1, [x8, -0x10]!"
+			// 16,x8,-=,x0,x8,[],x1,x8,8,+,[]
+			r_strbuf_setf (&op->esil,
+					"%d,%s,%c=,%s,%s,[],%s,%s,8,+,[]",
+					abs, MEMBASE64(2), sign,
+					REG64(0), MEMBASE64(2),
+					REG64(1), MEMBASE64(2));
+		// Post-index case
+		} else if (ISPOSTINDEX64()) {
+			int val = IMM64(3);
+			sign = val>=0?'+':'-';
+			abs = val>=0? val: -val;
+			// ldp x4, x5, [x8], -0x10
+			// x4,x8,[],x5,x8,8,+,[],16,x8,+=
+			r_strbuf_setf (&op->esil,
+					"%s,%s,[],%s,%s,8,+,[],%d,%s,%c=",
+					REG64(0), MEMBASE64(2),
+					REG64(1), MEMBASE64(2),
+					abs, MEMBASE64(2), sign);
+		} else {
+			r_strbuf_setf (&op->esil,
+					"%s,%s,%"PFMT64d",%c,[],"
+					"%s,%s,%"PFMT64d",%c,%d,+,[]",
+					REG64(0), MEMBASE64(2), abs, sign,
+					REG64(1), MEMBASE64(2), abs, sign, 8);
 		}
-		if (!strcmp ("sp", MEMBASE64(2))) {
-			op->stackop = R_ANAL_STACK_SET;
-			op->stackptr = 0;
-			op->ptr = MEMDISP64(2);
 		}
 		break;
 	case ARM64_INS_ADRP:
@@ -532,107 +1197,155 @@ static int analop64_esil(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int l
 		}
 		break;
 	case ARM64_INS_MOVK: // movk w8, 0x1290
-		// XXX: wrongly implemented
-		r_strbuf_setf (&op->esil, "%d,%"PFMT64d",<<,%s,|=",
-			LSHIFT2_64(1),
-			IMM64 (1),
+	{
+		unsigned int shift = LSHIFT2_64(1);
+		ut64 shifted_imm = IMM64(1) << shift;
+		ut64 mask = ~(0xffffLL << shift);
+
+		r_strbuf_setf (&op->esil, "%"PFMT64d",%s,&,%"PFMT64d",|,%s,=",
+			mask,
+			REG64(0),
+			shifted_imm,
+			REG64(0));
+
+		break;
+	}
+	case ARM64_INS_MOVZ:
+		r_strbuf_setf (&op->esil, "%"PFMT64d",%s,=",
+			IMM64(1) << LSHIFT2_64(1),
 			REG64 (0));
 		break;
-	case ARM64_INS_MOVZ:
-		// XXX: wrongly implemented
-		r_strbuf_setf (&op->esil, "%d,%s,=", IMM64 (1), REG64 (0));
+	/* ASR, SXTB, SXTH and SXTW are alias for SBFM */
+	case ARM64_INS_ASR:
+		op->cycles = 1;
+		op->type = R_ANAL_OP_TYPE_SHR;
+		OPCALL(">>>>");
+		break;
+	case ARM64_INS_SXTB:
+		if (arm64_reg_width(REGID64(0)) == 32) {
+			r_strbuf_setf (&op->esil, "%s,%s,=,8,%s,>>,%s,%s,=,%s,%s,&=,$c,?{,0xffffff00,%s,|=}",
+				REG64(1), REG64(0), REG64(1), REG64(1), REG64(0),
+				"0xff", REG64(0), REG64(0));
+		} else {
+			r_strbuf_setf (&op->esil, "%s,%s,=,8,%s,>>,%s,%s,=,%s,%s,&=,$c,?{,0xffffffffffffff00,%s,|=}",
+				REG64(1), REG64(0), REG64(1), REG64(1), REG64(0),
+				"0xff", REG64(0), REG64(0));
+		}
+		break;
+	case ARM64_INS_SXTH: /* halfword */
+		if (arm64_reg_width(REGID64(0)) == 32) {
+			r_strbuf_setf (&op->esil, "%s,%s,=,16,%s,>>,%s,%s,=,%s,%s,&=,$c,?{,0xffff0000,%s,|=}",
+				REG64(1), REG64(0), REG64(1), REG64(1), REG64(0),
+				"0xffff", REG64(0), REG64(0));
+		} else {
+			r_strbuf_setf (&op->esil, "%s,%s,=,16,%s,>>,%s,%s,=,%s,%s,&=,$c,?{,0xffffffffffffff00,%s,|=}",
+				REG64(1), REG64(0), REG64(1), REG64(1), REG64(0),
+				"0xffff", REG64(0), REG64(0));
+		}
+		break;
+	case ARM64_INS_SXTW: /* word */
+		r_strbuf_setf (&op->esil, "%s,%s,=,32,%s,>>,%s,%s,=,%s,%s,&=,$c,?{,0xffffffffffffff00,%s,|=}",
+				REG64(1), REG64(0), REG64(1), REG64(1), REG64(0),
+				"0xffffffff", REG64(0), REG64(0));
+		break;
+	case ARM64_INS_UXTB:
+		r_strbuf_setf (&op->esil, "%s,0xff,&,%s,=", REG64(1),REG64(0));
+		break;
+	case ARM64_INS_UXTH:
+		r_strbuf_setf (&op->esil, "%s,0xffff,&,%s,=", REG64(1),REG64(0));
 		break;
 	case ARM64_INS_RET:
 		r_strbuf_setf (&op->esil, "lr,pc,=");
+		break;
+	case ARM64_INS_BFI: // bfi w8, w8, 2, 1
+	case ARM64_INS_BFXIL:
+	{
+		ut64 mask = bitmask_by_width[IMM64 (3) - 1];
+		ut64 shift = IMM64 (2);
+		ut64 notmask = ~(mask << shift);
+		// notmask,dst,&,lsb,mask,src,&,<<,|,dst,=
+		r_strbuf_setf (&op->esil, "%"PFMT64u",%s,&,%"PFMT64u",%"PFMT64u",%s,&,<<,|,%s,=",
+			notmask, REG64 (0), shift, mask, REG64 (1), REG64 (0));
+		break;
+	}
+	case ARM64_INS_NEG:
+#if CS_API_MAJOR > 3
+	case ARM64_INS_NEGS:
+#endif
+		if (LSHIFT2_64 (1)) {
+			SHIFTED_REG64_APPEND (&op->esil, 1);
+		} else {
+			r_strbuf_appendf (&op->esil, "%s", REG64 (1));
+		}
+		r_strbuf_appendf (&op->esil, ",0,-,%s,=", REG64 (0));
 		break;
 	}
 	return 0;
 }
 
+#define MATH32(opchar) arm32math(a, op, addr, buf, len, handle, insn, pcdelta, str, opchar, 0)
+#define MATH32_NEG(opchar) arm32math(a, op, addr, buf, len, handle, insn, pcdelta, str, opchar, 1)
+
+static void arm32math(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, csh *handle, cs_insn *insn, int pcdelta, char (*str)[32], const char *opchar, int negate) {
+	const char *dest = ARG(0);
+	const char *op1;
+	const char *op2;
+	bool rotate_imm = OPCOUNT() > 3;
+	if (OPCOUNT() > 2) {
+		 op1 = ARG(1);
+		 op2 = ARG(2);
+	} else {
+		op1 = dest;
+		op2 = ARG(1);
+	}
+	// right operand
+	if (rotate_imm) {
+		r_strbuf_appendf (&op->esil, "%s,", ARG(3));
+	}
+	if (strcmp(op2, "pc") == 0) {
+		r_strbuf_appendf (&op->esil, "%d,$$,+", pcdelta);
+	} else {
+		r_strbuf_appendf (&op->esil, "%s", op2);
+	}
+	if (rotate_imm) {
+		r_strbuf_appendf (&op->esil, ",>>>");
+	}
+	if (negate) {
+		r_strbuf_appendf (&op->esil, ",-1,^");
+	}
+	// left operand
+	if (strcmp(dest, op1) == 0) {
+		r_strbuf_appendf (&op->esil, ",%s,%s=", dest, opchar);
+	} else {
+		if (strcmp(op1, "pc") == 0) {
+			r_strbuf_appendf (&op->esil, ",%d,$$,+,%s,%s,=", pcdelta, opchar, dest);
+		} else {
+			r_strbuf_appendf (&op->esil, ",%s,%s,%s,=", op1, opchar, dest);
+		}
+	}
+}
+
+
+
 static int analop_esil(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, csh *handle, cs_insn *insn, bool thumb) {
-	const char *close_cond[3];
-	close_cond[0] = "\0";
-	close_cond[1] = ",}\0";
-	close_cond[2] = ",},}\0";
-	int close_type = 0;
+
 	int i;
+	const char *postfix = NULL;
 	char str[32][32];
 	int msr_flags;
 	//this should be the theory
 	//int pcdelta = (thumb ? 4 : 8);
 	int pcdelta = (op->size == 4)? 8: 4;
+
+	opex (&op->opex, *handle, insn);
+
 	r_strbuf_init (&op->esil);
 	r_strbuf_set (&op->esil, "");
-	switch (insn->detail->arm.cc) {
-	case ARM_CC_EQ:
-		close_type = 1;
-		r_strbuf_setf (&op->esil, "zf,?{,");
-		break;
-	case ARM_CC_NE:
-		close_type = 1;
-		r_strbuf_setf (&op->esil, "zf,!,?{,");
-		break;
-	case ARM_CC_HS:
-		close_type = 1;
-		r_strbuf_setf (&op->esil, "cf,?{,");
-		break;
-	case ARM_CC_LO:
-		close_type = 1;
-		r_strbuf_setf (&op->esil, "cf,!,?{,");
-		break;
-	case ARM_CC_MI:
-		close_type = 1;
-		r_strbuf_setf (&op->esil, "nf,?{,");
-		break;
-	case ARM_CC_PL:
-		close_type = 1;
-		r_strbuf_setf (&op->esil, "nf,!,?{,");
-		break;
-	case ARM_CC_VS:
-		close_type = 1;
-		r_strbuf_setf (&op->esil, "vf,?{,");
-		break;
-	case ARM_CC_VC:
-		close_type = 1;
-		r_strbuf_setf (&op->esil, "vf,!,?{,");
-		break;
-	case ARM_CC_HI:
-		close_type = 2;
-		r_strbuf_setf (&op->esil, "cf,?{,zf,!,?{,");
-		break;
-	case ARM_CC_LS:
-		close_type = 2;
-		r_strbuf_setf (&op->esil, "cf,!,?{,zf,?{,");
-		break;
-	case ARM_CC_GE:
-		close_type = 1;
-		r_strbuf_setf (&op->esil, "nf,vf,==,?{,");
-		break;
-	case ARM_CC_LT:
-		close_type = 1;
-		r_strbuf_setf (&op->esil, "nf,vf,==,!,?{,");
-		break;
-	case ARM_CC_GT:
-		// zf == 0 && nf == vf
-		close_type = 2;
-		r_strbuf_setf (&op->esil, "zf,!,?{,nf,vf,==,?{,");
-		break;
-	case ARM_CC_LE:
-		// zf == 1 && nf != vf
-		close_type = 2;
-		r_strbuf_setf (&op->esil, "zf,?{,nf,vf,==,!,?{,");
-		break;
-	case ARM_CC_AL:
-		// always executed
-		break;
-	default:
-		break;
-	}
-	// TODO: PREFIX CONDITIONAL
+	postfix = arm_prefix_cond (op, insn->detail->arm.cc);
 
 	switch (insn->id) {
 	case ARM_INS_IT:
-		r_strbuf_appendf (&op->esil, "%d,pc,+=%s", op->fail, close_cond[close_type]);
+		r_strbuf_appendf (&op->esil, "%d,pc,+=%s", op->fail, postfix);
 		break;
 	case ARM_INS_NOP:
 		r_strbuf_setf (&op->esil, ",");
@@ -644,18 +1357,46 @@ static int analop_esil(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len
 	case ARM_INS_UDF:
 		r_strbuf_setf (&op->esil, "%s,TRAP", ARG(0));
 		break;
-	case ARM_INS_EOR:
-		if (OPCOUNT() == 2) {
-			r_strbuf_setf (&op->esil, "%s,%s,^=", ARG(1), ARG(0));
-		} else if (OPCOUNT() == 3) {
-		        r_strbuf_setf (&op->esil, "%s,%s,^,%s,=", ARG(2), ARG(1), ARG(0));
-		}
+	case ARM_INS_SADD16:
+	case ARM_INS_SADD8:
+	case ARM_INS_ADD:
+		op->type = R_ANAL_OP_TYPE_ADD;
+		MATH32("+");
 		break;
-	case ARM_INS_ORR:
-		r_strbuf_setf (&op->esil, "%s,%s,|=", ARG(1), ARG(0));
+	case ARM_INS_SSUB16:
+	case ARM_INS_SSUB8:
+	case ARM_INS_SUBW:
+	case ARM_INS_SUB:
+		op->type = R_ANAL_OP_TYPE_ADD;
+		MATH32("-");
+		break;
+	case ARM_INS_MUL:
+		op->type = R_ANAL_OP_TYPE_MUL;
+		MATH32("*");
 		break;
 	case ARM_INS_AND:
-		r_strbuf_setf (&op->esil, "%s,%s,&=", ARG(1), ARG(0));
+		op->type = R_ANAL_OP_TYPE_AND;
+		MATH32("&");
+		break;
+	case ARM_INS_ORR:
+		op->type = R_ANAL_OP_TYPE_OR;
+		MATH32("|");
+		break;
+	case ARM_INS_EOR:
+		op->type = R_ANAL_OP_TYPE_XOR;
+		MATH32("^");
+		break;
+	case ARM_INS_ORN:
+		op->type = R_ANAL_OP_TYPE_OR;
+		MATH32_NEG("|");
+		break;
+	case ARM_INS_LSR:
+		op->type = R_ANAL_OP_TYPE_SHR;
+		MATH32(">>");
+		break;
+	case ARM_INS_LSL:
+		op->type = R_ANAL_OP_TYPE_SHL;
+		MATH32("<<");
 		break;
 	case ARM_INS_SVC:
 		r_strbuf_setf (&op->esil, "%s,$", ARG(0));
@@ -708,7 +1449,7 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 		r_strbuf_appendf (&op->esil, "%d,sp,+=",
 			4 * insn->detail->arm.op_count);
 		break;
-	case ARM_INS_LDM:  
+	case ARM_INS_LDM:
                 {
 		const char *comma = "";
 		for (i=1; i<insn->detail->arm.op_count; i++) {
@@ -724,24 +1465,8 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 	case ARM_INS_CMN:
 		r_strbuf_appendf (&op->esil, "%s,%s,!=,$z,zf,=", ARG(1), ARG(0));
 		break;
-	case ARM_INS_LSL:
-		// suffix 'S' forces conditional flag to be updated
-		if (OPCOUNT() == 2) {
-			r_strbuf_appendf (&op->esil, "%s,%s,<<=", ARG(1), ARG(0));
-		} else if (OPCOUNT() == 3) {
-			r_strbuf_appendf (&op->esil, "%s,%s,<<,%s,=", ARG(2), ARG(1), ARG(0));
-		}
-		break;
-	case ARM_INS_LSR:
-		// suffix 'S' forces conditional flag to be updated
-		if (OPCOUNT() == 2) {
-			r_strbuf_appendf (&op->esil, "%s,%s,>>=", ARG(1), ARG(0));
-		} else if (OPCOUNT() == 3) {
-			r_strbuf_appendf (&op->esil, "%s,%s,>>,%s,=", ARG(2), ARG(1), ARG(0));
-		}
-		break;
 	case ARM_INS_B:
-		r_strbuf_appendf (&op->esil, "%s,pc,=%s", ARG(0), close_cond[close_type]);
+		r_strbuf_appendf (&op->esil, "%s,pc,=%s", ARG(0), postfix);
 		break;
 	case ARM_INS_BL:
 	case ARM_INS_BLX:
@@ -762,62 +1487,6 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 	case ARM_INS_CBNZ:
 		r_strbuf_appendf (&op->esil, "zf,!,?{,%s,pc,=", ARG(0));
 		break;
-	case ARM_INS_SSUB16:
-	case ARM_INS_SSUB8:
-	case ARM_INS_SUBW:
-	case ARM_INS_SUB:
-		if (!strcmp (ARG(2), "")) {
-			if (!strcmp (ARG(0), ARG(1))) {
-				r_strbuf_appendf (&op->esil, "0,%s,=", ARG(0));
-			} else {
-				r_strbuf_appendf (&op->esil, "%s,%s,-=",
-					ARG(1), ARG(0));
-			}
-		} else {
-			if (!strcmp (ARG(0), ARG(1))) {
-				r_strbuf_appendf (&op->esil, "%s,%s,-=", ARG(2), ARG(0));
-			} else {
-				r_strbuf_appendf (&op->esil, "%s,%s,-,%s,=",
-					ARG(2), ARG(1), ARG(0));
-			}
-		}
-		break;
-	case ARM_INS_MUL:
-		r_strbuf_appendf (&op->esil, "%s,%s,*,%s,=", ARG(2), ARG(1), ARG(0));
-		break;
-	case ARM_INS_SADD16:
-	case ARM_INS_SADD8:
-	case ARM_INS_ADD:
-		if (!strcmp (ARG(2), "")) {
-			if (!strcmp (ARG(1), "pc")) {
-				int delta = thumb ? 4 : 8;
-				const char *pc = "$$";
-				r_strbuf_appendf (&op->esil,
-					"%d,%s,+,%s,+=",
-					delta, pc, ARG(0));
-			} else {
-				if (!strcmp (ARG(0), ARG(1))) {
-					r_strbuf_appendf (&op->esil, "2,%s,*=", ARG(0));
-				} else {
-					r_strbuf_appendf (&op->esil, "%s,%s,+=", ARG(1), ARG(0));
-				}
-			}
-		} else {
-			if (!strcmp (ARG(1), "pc")) {
-				const char *pc = "$$";
-				int delta = thumb ? 4 : 8;
-				r_strbuf_appendf (&op->esil, "%d,%s,+,%s,+,%s,=", delta, ARG(2), pc, ARG(0));
-			} else {
-				if (!strcmp (ARG(0), ARG(1))) {
-					r_strbuf_appendf (&op->esil, "%s,%s,+=", ARG(2), ARG(0));
-				} else if (!strcmp (ARG(2), "0")) {
-					r_strbuf_appendf (&op->esil, "%s,%s,=", ARG(1), ARG(0));
-				} else {
-					r_strbuf_appendf (&op->esil, "%s,%s,+,%s,=", ARG(2), ARG(1), ARG(0));
-				}
-			}
-		}
-		break;
 		// TODO (maybe?): ARM Cortex allows for a STRD "double word" 64-bit store
 		// e.g. 'strD r1, r2, [r3]'
 		// TODO: Encapsulate STR/H/B into a function to make it more elegant
@@ -832,7 +1501,7 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 					if (insn->detail->arm.writeback) {
 						r_strbuf_appendf (&op->esil, ",%d,%s,-,%s,=",
 								  -disp, MEMBASE(1), MEMBASE(1));
-					}					
+					}
 				} else {
 					r_strbuf_appendf (&op->esil, "%s,0x%"PFMT64x",%s,+,0xffffffff,&,=[4]",
 							  REG(0), (ut64)disp, MEMBASE(1));
@@ -856,7 +1525,7 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 					case ARM_SFT_LSR:
 						r_strbuf_appendf (&op->esil, "%s,%s,%d,%s,>>,+,0xffffffff,&,=[4]",
 								  REG(0), MEMBASE(1), SHIFTVALUE(1), MEMINDEX(1));
-						if (insn->detail->arm.writeback) { 
+						if (insn->detail->arm.writeback) {
 							r_strbuf_appendf (&op->esil, ",%s,%d,%s,>>,+,%s,=",
 									  MEMBASE(1), SHIFTVALUE(1), MEMINDEX(1), MEMBASE(1));
 						}
@@ -864,7 +1533,7 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 					case ARM_SFT_ASR:
 						r_strbuf_appendf (&op->esil, "%s,%s,%d,%s,>>>>,+,0xffffffff,&,=[4]",
 								  REG(0), MEMBASE(1), SHIFTVALUE(1), MEMINDEX(1));
-						if (insn->detail->arm.writeback) { 
+						if (insn->detail->arm.writeback) {
 							r_strbuf_appendf (&op->esil, ",%s,%d,%s,>>>>,+,%s,=",
 									  MEMBASE(1), SHIFTVALUE(1), MEMINDEX(1), MEMBASE(1));
 						}
@@ -872,7 +1541,7 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 					case ARM_SFT_ROR:
 						r_strbuf_appendf (&op->esil, "%s,%s,%d,%s,>>>,+,0xffffffff,&,=[4]",
 								  REG(0), MEMBASE(1), SHIFTVALUE(1), MEMINDEX(1));
-						if (insn->detail->arm.writeback) { 
+						if (insn->detail->arm.writeback) {
 							r_strbuf_appendf (&op->esil, ",%s,%d,%s,>>>,+,%s,=",
 									  MEMBASE(1), SHIFTVALUE(1), MEMINDEX(1), MEMBASE(1));
 						}
@@ -932,7 +1601,7 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 			}
 		}
 		// Account for conditionals
-		r_strbuf_appendf (&op->esil, "%s", close_cond[close_type]);
+		r_strbuf_appendf (&op->esil, "%s", postfix);
 		break;
 	case ARM_INS_STRHT:
 	case ARM_INS_STRH:
@@ -946,7 +1615,7 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 					if (insn->detail->arm.writeback) {
 						r_strbuf_appendf (&op->esil, ",%d,%s,-,%s,=",
 								  -disp, MEMBASE(1), MEMBASE(1));
-					}					
+					}
 				} else {
 					r_strbuf_appendf (&op->esil, "%s,%s,0x%"PFMT64x",+,0xffffffff,&,=[2]",
 							  REG(0), MEMBASE(1), (ut64)disp);
@@ -970,7 +1639,7 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 					case ARM_SFT_LSR:
 						r_strbuf_appendf (&op->esil, "%s,%s,%d,%s,>>,+,0xffffffff,&,=[2]",
 								  REG(0), MEMBASE(1), SHIFTVALUE(1), MEMINDEX(1));
-						if (insn->detail->arm.writeback) { 
+						if (insn->detail->arm.writeback) {
 							r_strbuf_appendf (&op->esil, ",%s,%d,%s,>>,+,%s,=",
 									  MEMBASE(1), SHIFTVALUE(1), MEMINDEX(1), MEMBASE(1));
 						}
@@ -978,7 +1647,7 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 					case ARM_SFT_ASR:
 						r_strbuf_appendf (&op->esil, "%s,%s,%d,%s,>>>>,+,0xffffffff,&,=[2]",
 								  REG(0), MEMBASE(1), SHIFTVALUE(1), MEMINDEX(1));
-						if (insn->detail->arm.writeback) { 
+						if (insn->detail->arm.writeback) {
 							r_strbuf_appendf (&op->esil, ",%s,%d,%s,>>>>,+,%s,=",
 									  MEMBASE(1), SHIFTVALUE(1), MEMINDEX(1), MEMBASE(1));
 						}
@@ -986,7 +1655,7 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 					case ARM_SFT_ROR:
 						r_strbuf_appendf (&op->esil, "%s,%s,%d,%s,>>>,+,0xffffffff,&,=[2]",
 								  REG(0), MEMBASE(1), SHIFTVALUE(1), MEMINDEX(1));
-						if (insn->detail->arm.writeback) { 
+						if (insn->detail->arm.writeback) {
 							r_strbuf_appendf (&op->esil, ",%s,%d,%s,>>>,+,%s,=",
 									  MEMBASE(1), SHIFTVALUE(1), MEMINDEX(1), MEMBASE(1));
 						}
@@ -1046,7 +1715,7 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 			}
 		}
 		// Account for conditionals
-		r_strbuf_appendf (&op->esil, "%s", close_cond[close_type]);
+		r_strbuf_appendf (&op->esil, "%s", postfix);
 		break;
 	case ARM_INS_STRBT:
 	case ARM_INS_STRB:
@@ -1059,7 +1728,7 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 					if (insn->detail->arm.writeback) {
 						r_strbuf_appendf (&op->esil, ",%d,%s,-,%s,=",
 								  -disp, MEMBASE(1), MEMBASE(1));
-					}					
+					}
 				} else {
 					r_strbuf_appendf (&op->esil, "%s,%s,0x%"PFMT64x",+,0xffffffff,&,=[1]",
 							  REG(0), MEMBASE(1), (ut64)disp);
@@ -1083,7 +1752,7 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 					case ARM_SFT_LSR:
 						r_strbuf_appendf (&op->esil, "%s,%s,%d,%s,>>,+,0xffffffff,&,=[1]",
 								  REG(0), MEMBASE(1), SHIFTVALUE(1), MEMINDEX(1));
-						if (insn->detail->arm.writeback) { 
+						if (insn->detail->arm.writeback) {
 							r_strbuf_appendf (&op->esil, ",%s,%d,%s,>>,+,%s,=",
 									  MEMBASE(1), SHIFTVALUE(1), MEMINDEX(1), MEMBASE(1));
 						}
@@ -1091,7 +1760,7 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 					case ARM_SFT_ASR:
 						r_strbuf_appendf (&op->esil, "%s,%s,%d,%s,>>>>,+,0xffffffff,&,=[1]",
 								  REG(0), MEMBASE(1), SHIFTVALUE(1), MEMINDEX(1));
-						if (insn->detail->arm.writeback) { 
+						if (insn->detail->arm.writeback) {
 							r_strbuf_appendf (&op->esil, ",%s,%d,%s,>>>>,+,%s,=",
 									  MEMBASE(1), SHIFTVALUE(1), MEMINDEX(1), MEMBASE(1));
 						}
@@ -1099,7 +1768,7 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 					case ARM_SFT_ROR:
 						r_strbuf_appendf (&op->esil, "%s,%s,%d,%s,>>>,+,0xffffffff,&,=[1]",
 								  REG(0), MEMBASE(1), SHIFTVALUE(1), MEMINDEX(1));
-						if (insn->detail->arm.writeback) { 
+						if (insn->detail->arm.writeback) {
 							r_strbuf_appendf (&op->esil, ",%s,%d,%s,>>>,+,%s,=",
 									  MEMBASE(1), SHIFTVALUE(1), MEMINDEX(1), MEMBASE(1));
 						}
@@ -1159,7 +1828,7 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 			}
 		}
 		// Account for conditionals
-		r_strbuf_appendf (&op->esil, "%s", close_cond[close_type]);
+		r_strbuf_appendf (&op->esil, "%s", postfix);
 		break;
 	case ARM_INS_TST:
 		r_strbuf_appendf (&op->esil, "%s,%s,==,$z,zf,=", ARG(1), ARG(0));
@@ -1246,7 +1915,12 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 			op->type = R_ANAL_OP_TYPE_UJMP;
 		}
 		break;
+	case ARM_INS_MRS:
+		op->family = R_ANAL_OP_FAMILY_PRIV;
+		// TODO: esil for MRS
+		break;
 	case ARM_INS_MSR:
+		op->family = R_ANAL_OP_FAMILY_PRIV;
 		msr_flags = insn->detail->arm.operands[0].reg >> 4;
 		r_strbuf_appendf (&op->esil, "0,",REG(1));
 		if (msr_flags & 1) {
@@ -1294,7 +1968,7 @@ r4,r5,r6,3,sp,[*],12,sp,+=
 	if (insn->detail->arm.update_flags) {
 	        r_strbuf_appendf (&op->esil, ",$z,zf,=");
 	}
-        
+
 	return 0;
 }
 
@@ -1455,7 +2129,8 @@ static void anop64 (csh handle, RAnalOp *op, cs_insn *insn) {
 		op->type = R_ANAL_OP_TYPE_LOAD;
 		if (REGBASE64(1) == ARM64_REG_X29) {
 			op->stackop = R_ANAL_STACK_GET;
-			op->stackptr = MEMDISP64(1);
+			op->stackptr = 0;
+			op->ptr = MEMDISP64(1);
 		} else {
 			if (ISIMM64(1)) {
 				op->type = R_ANAL_OP_TYPE_LEA;
@@ -1801,6 +2476,12 @@ jmp $$ + 4 + ( [delta] * 2 )
 			op->fail = addr + op->size;
 		}
 		break;
+	case ARM_INS_ADR:
+		op->type = R_ANAL_OP_TYPE_LEA;
+		// Set the pointer address and align it
+		op->ptr = IMM(1) + addr + 4 - (addr%4);
+		op->refptr = 1;
+		break;
 	default:
 		break;
 	}
@@ -2051,7 +2732,7 @@ static char *get_reg_profile(RAnal *anal) {
 		"gpr	x28	.64	224	0\n"
 		"gpr	x29	.64	232	0\n"
 		"gpr	x30	.64	240	0\n"
-		"gpr	tmp	.64	248	0\n"
+		"gpr	tmp	.64	288	0\n"
 		/* 64bit double */
 		"gpr	d0	.64	0	0\n" // x0
 		"gpr	d1	.64	8	0\n" // x0
@@ -2092,13 +2773,12 @@ static char *get_reg_profile(RAnal *anal) {
 		"gpr	pc	.64	256	0\n"
 		"gpr	zr	.64	272	0\n"
 		"gpr	xzr	.64	272	0\n"
-		"gpr	cpsr	.64	280	0	_____tfiae_____________j__qvczn\n"
-		"gpr	pstate	.64	280	0\n" // x0
-		// probably wrong
-		"gpr	nf	.1	.2240	0	sign\n" // msb bit of last op
-		"gpr	zf	.1	.2241	0	zero\n" // set if last op is 0
-		"gpr	cf	.1	.2242	0	carry\n" // set if last op carries
-		"gpr	vf	.1	.2243	0	overflow\n"; // set if overflows
+		"flg	pstate	.64	280	0   _____tfiae_____________j__qvczn\n" // x0
+		//"flg	cpsr	.32	280	0\n" //	_____tfiae_____________j__qvczn\n"
+		"flg	vf	.1	280.28	0	overflow\n" // set if overflows
+		"flg	cf	.1	280.29	0	carry\n" // set if last op carries
+		"flg	zf	.1	280.30	0	zero\n" // set if last op is 0
+		"flg	nf	.1	280.31	0	sign\n"; // msb bit of last op
 	} else {
 		p = \
 		"=PC	r15\n"
@@ -2140,7 +2820,7 @@ static char *get_reg_profile(RAnal *anal) {
 		"gpr	r15	.32	60	0\n"
 		"flg	cpsr	.32	64	0\n"
 		"gpr	blank	.32	68	0\n" // Hack, the bit fields below don't work on the last register??
-		  
+
 		  // CPSR bit fields:
 		  // 576-580 Mode fields (and register sets associated to each field):
 		  //10000 	User 	R0-R14, CPSR, PC
@@ -2149,7 +2829,7 @@ static char *get_reg_profile(RAnal *anal) {
 		  //10011 	SVC (supervisor) 	R0-R12, R13_svc R14_svc CPSR, SPSR_irq, PC
 		  //10111 	Abort 	R0-R12, R13_abt R14_abt CPSR, SPSR_abt PC
 		  //11011 	Undefined 	R0-R12, R13_und R14_und, CPSR, SPSR_und PC
-		  //11111 	System (ARMv4+) 	R0-R14, CPSR, PC 
+		  //11111 	System (ARMv4+) 	R0-R14, CPSR, PC
 		"flg	tf	.1	.517	0	thumb\n" // +5
 		  // 582 FIQ disable bit
 		  // 583 IRQ disable bit
@@ -2189,6 +2869,51 @@ static int archinfo(RAnal *anal, int q) {
 	return 4; // XXX
 }
 
+static ut8 *anal_mask(RAnal *anal, int size, const ut8 *data, ut64 at) {
+	RAnalOp *op = NULL;
+	ut8 *ret = NULL;
+	int oplen, idx = 0, obits = anal->bits;
+	RAnalHint *hint = NULL;
+
+	if (!data) {
+		return NULL;
+	}
+
+	op = r_anal_op_new ();
+	ret = malloc (size);
+	memset (ret, 0xff, size);
+
+	while (idx < size) {
+		hint = r_anal_hint_get (anal, at + idx);
+		if (hint) {
+			if (hint->bits != 0) {
+				anal->bits = hint->bits;
+			}
+			free (hint);
+		}
+
+		if ((oplen = analop (anal, op, at + idx, data + idx, size - idx)) < 1) {
+			break;
+		}
+		if (op->ptr != UT64_MAX || op->jump != UT64_MAX) {
+			switch (oplen) {
+			case 2:
+				memcpy (ret + idx, "\xf0\x00", 2);
+				break;
+			case 4:
+				memcpy (ret + idx, "\xff\xf0\x00\x00", 4);
+				break;
+			}
+		}
+		idx += oplen;
+	}
+
+	anal->bits = obits;
+	free (op);
+
+	return ret;
+}
+
 RAnalPlugin r_anal_plugin_arm_cs = {
 	.name = "arm",
 	.desc = "Capstone ARM analyzer",
@@ -2197,6 +2922,7 @@ RAnalPlugin r_anal_plugin_arm_cs = {
 	.arch = "arm",
 	.archinfo = archinfo,
 	.get_reg_profile = get_reg_profile,
+	.anal_mask = anal_mask,
 	.bits = 16 | 32 | 64,
 	.op = &analop,
 };

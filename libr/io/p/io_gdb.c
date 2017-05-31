@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2010-2016 pancake */
+/* radare - LGPL - Copyright 2010-2017 pancake */
 
 #include <r_io.h>
 #include <r_lib.h>
@@ -6,6 +6,7 @@
 #include <r_util.h>
 #define IRAPI static inline
 #include <libgdbr.h>
+#include <gdbclient/commands.h>
 
 typedef struct {
 	libgdbr_t desc;
@@ -124,13 +125,24 @@ static int __write(RIO *io, RIODesc *fd, const ut8 *buf, int count) {
 }
 
 static ut64 __lseek(RIO *io, RIODesc *fd, ut64 offset, int whence) {
-	return offset;
+	switch (whence) {
+	case R_IO_SEEK_SET:
+		return offset;
+	case R_IO_SEEK_CUR:
+		return io->off + offset;
+	case R_IO_SEEK_END:
+		return UT64_MAX;
+	default:
+		return offset;
+	}
 }
 
 static int __read(RIO *io, RIODesc *fd, ut8 *buf, int count) {
 	memset (buf, 0xff, count);
 	ut64 addr = io->off;
-	if (!desc || !desc->data) return -1;
+	if (!desc || !desc->data) {
+		return -1;
+	}
 	return debug_gdb_read_at(buf, count, addr);
 }
 
@@ -139,7 +151,7 @@ static int __close(RIODesc *fd) {
 	return -1;
 }
 
-int send_command(libgdbr_t* g, const char* command);
+int send_msg(libgdbr_t* g, const char* command);
 int read_packet(libgdbr_t* instance);
 
 static int __system(RIO *io, RIODesc *fd, const char *cmd) {
@@ -150,7 +162,9 @@ static int __system(RIO *io, RIODesc *fd, const char *cmd) {
                         " =!pid      - show targeted pid\n"
                         " =!pkt s    - send packet 's'\n");
 	} else if (!strncmp (cmd, "pkt ", 4)) {
-		send_command (desc, cmd + 4);
+		if (send_msg (desc, cmd + 4) == -1) {
+			return false;
+		}
 		int r = read_packet (desc);
 		eprintf ("r = %d\n", r);
 	} else if (!strncmp (cmd, "pid", 3)) {
@@ -180,3 +194,10 @@ RIOPlugin r_io_plugin_gdb = {
 	.isdbg = true
 };
 
+#ifndef CORELIB
+RLibStruct radare_plugin = {
+	.type = R_LIB_TYPE_IO,
+	.data = &r_io_plugin_gdb,
+	.version = R2_VERSION
+};
+#endif

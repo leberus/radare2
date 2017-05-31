@@ -282,11 +282,26 @@ R_API int r_buf_set_bits(RBuffer *b, int bitoff, int bitsize, ut64 value) {
 }
 
 R_API int r_buf_set_bytes(RBuffer *b, const ut8 *buf, ut64 length) {
-	if (length <= 0 || !buf) return false;
-	free (b->buf);
-	if (!(b->buf = malloc (length)))
+	if (length <= 0 || !buf) {
 		return false;
+	}
+	free (b->buf);
+	if (!(b->buf = malloc (length + 1))) {
+		return false;
+	}
 	memmove (b->buf, buf, length);
+	b->buf[length] = '\0';
+	b->length = length;
+	b->empty = 0;
+	return true;
+}
+
+R_API int r_buf_set_bytes_steal(RBuffer *b, const ut8 *buf, ut64 length) {
+	if (length <= 0 || !buf) {
+		return false;
+	}
+	free (b->buf);
+	b->buf = (ut8*)buf;
 	b->length = length;
 	b->empty = 0;
 	return true;
@@ -374,13 +389,16 @@ R_API bool r_buf_append_ut16(RBuffer *b, ut16 n) {
 }
 
 R_API bool r_buf_append_ut32(RBuffer *b, ut32 n) {
-	if (b->empty) b->length = b->empty = 0;
+	if (b->empty) {
+		b->length = b->empty = 0;
+	}
 	if (b->fd != -1) {
 		return r_buf_append_bytes (b, (const ut8*)&n, sizeof (n));
 	}
-	if (!(b->buf = realloc (b->buf, b->length+sizeof (n))))
+	if (!(b->buf = realloc (b->buf, b->length+sizeof (n)))) {
 		return false;
-	memmove (b->buf+b->length, &n, sizeof (n));
+	}
+	memmove (b->buf + b->length, &n, sizeof (n));
 	b->length += sizeof (n);
 	return true;
 }
@@ -483,7 +501,11 @@ static int r_buf_fcpy_at (RBuffer *b, ut64 addr, ut8 *buf, const char *fmt, int 
 	for (i = len = 0; i < n; i++)
 	for (j = 0; fmt[j]; j++) {
 		switch (fmt[j]) {
+		#ifdef _MSC_VER
+		case'0':case'1':case'2':case'3':case'4':case'5':case'6':case'7':case'8':case'9':
+		#else
 		case '0'...'9':
+		#endif
 			if (m == 1)
 				m = r_num_get (NULL, &fmt[j]);
 			continue;
@@ -634,7 +656,11 @@ R_API int r_buf_write_at(RBuffer *b, ut64 addr, const ut8 *buf, int len) {
 		}
 		if (newlen > b->length) {
 			b->length = newlen;
+#ifdef _MSC_VER
+			_chsize (b->fd, newlen);
+#else
 			ftruncate (b->fd, newlen);
+#endif
 		}
 		return r_sandbox_write (b->fd, buf, len);
 	}

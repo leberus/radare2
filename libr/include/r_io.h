@@ -48,13 +48,12 @@ typedef struct r_io_map_t {
 
 typedef struct r_io_section_t {
 	char *name;
-	ut64 offset; // TODO: rename to paddr or maddr?
+	ut64 paddr;
 	ut64 vaddr;
 	ut64 size;
 	ut64 vsize;
-	int rwx; // rename to perm? like in rdebug? what about rbin?
+	int flags;
 	int id;
-	/* */
 	int arch;
 	int bits;
 	ut32 bin_id;
@@ -125,8 +124,6 @@ typedef struct r_io_t {
 	int raised;
 	int va;
 	bool pava;
-	int raw;
-	int vio; // remove that when vio replaces the old stuff
 	int sectonly;
 	char *referer;
 	char *redirect;
@@ -170,10 +167,12 @@ typedef struct r_io_plugin_t {
 //	void *plugin;
 	char *name;
 	char *desc;
+	char *version;
+	char *author;
 	char *license;
 	void *widget;
 	int (*listener)(RIODesc *io);
-	int (*init)();
+	int (*init)(void);
 	RIOUndo undo;
 	bool isdbg;
 	// int (*is_file_opened)(RIO *io, RIODesc *fd, const char *);
@@ -289,13 +288,13 @@ typedef struct r_io_range_t {
 /* io/plugin.c */
 R_API RIO *r_io_new(void);
 R_API RIO *r_io_free(RIO *io);
-R_API void r_io_set_raw(RIO *io, int raw);
 R_API bool r_io_plugin_init(RIO *io);
 R_API void r_io_raise (RIO *io, int fd);
 R_API int r_io_plugin_generate(RIO *io);
 R_API bool r_io_plugin_add(RIO *io, RIOPlugin *plugin);
 R_API int r_io_plugin_list(RIO *io);
 R_API int r_io_is_listener(RIO *io);
+R_API bool r_io_is_blockdevice(RIO *io);
 
 R_API RIOPlugin *r_io_plugin_byname(RIO *io, const char *name);
 R_API RIOPlugin *r_io_plugin_resolve(RIO *io, const char *filename, bool many);
@@ -317,18 +316,14 @@ R_API int r_io_is_valid_offset (RIO *io, ut64 offset, int hasperm);
 R_API RIODesc *r_io_use_fd(RIO *io, int fd);
 R_API int r_io_use_desc(RIO *io, RIODesc *fd);
 
-R_API const ut8* r_io_get_raw(RIO *io, ut64 addr, int *len);
 R_API RBuffer *r_io_read_buf(RIO *io, ut64 addr, int len);
-R_API int r_io_vread(RIO *io, ut64 vaddr, ut8 *buf, int len);
 R_API int r_io_read_internal(RIO *io, ut8 *buf, int len);
-R_API int r_io_mread(RIO *io, int fd, ut64 maddr, ut8 *buf, int len);
 R_API int r_io_pread(RIO *io, ut64 paddr, ut8 *buf, int len);
 R_API int r_io_read(RIO *io, ut8 *buf, int len);
 R_API int r_io_read_at(RIO *io, ut64 addr, ut8 *buf, int len);
 R_API ut64 r_io_read_i(RIO *io, ut64 addr, int sz);
 R_API int r_io_write(RIO *io, const ut8 *buf, int len);
 R_API int r_io_write_at(RIO *io, ut64 addr, const ut8 *buf, int len);
-R_API int r_io_mwrite(RIO *io, int fd, ut64 maddr, ut8 *buf, int len);
 R_API int r_io_pwrite(RIO *io, ut64 paddr, const ut8 *buf, int len);
 R_API ut64 r_io_seek(RIO *io, ut64 offset, int whence);
 R_API int r_io_system(RIO *io,  const char *cmd);
@@ -429,7 +424,7 @@ R_API RIOUndos *r_io_sundo(RIO *io, ut64 offset);
 R_API RIOUndos *r_io_sundo_redo(RIO *io);
 R_API void r_io_sundo_push(RIO *io, ut64 off, int cursor);
 R_API void r_io_sundo_reset(RIO *io);
-R_API void r_io_sundo_list(RIO *io, int mode);
+R_API RList *r_io_sundo_list(RIO *io, int mode);
 /* write undo */
 R_API void r_io_wundo_new(RIO *io, ut64 off, const ut8 *data, int len);
 R_API void r_io_wundo_apply_all(RIO *io, int set);
@@ -494,6 +489,7 @@ extern RIOPlugin r_io_plugin_r2web;
 extern RIOPlugin r_io_plugin_bochs;
 extern RIOPlugin r_io_plugin_r2k;
 extern RIOPlugin r_io_plugin_tcp;
+extern RIOPlugin r_io_plugin_null;
 
 #endif
 

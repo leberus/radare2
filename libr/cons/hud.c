@@ -3,20 +3,22 @@
 #include <r_cons.h>
 #include <ctype.h>
 
+#define I(x) r_cons_singleton ()->x
+
 // Display the content of a file in the hud
-R_API char *r_cons_hud_file(const char *f, const bool usecolor) {
+R_API char *r_cons_hud_file(const char *f) {
 	char *s = r_file_slurp (f, NULL);
 	if (s) {
-		char *ret = r_cons_hud_string (s, usecolor);
+		char *ret = r_cons_hud_string (s);
 		free (s);
 		return ret;
 	}
 	return NULL;
 }
 
-// Display a buffer in the hud (splitting it line-by-line and ignoring 
+// Display a buffer in the hud (splitting it line-by-line and ignoring
 // the lines starting with # )
-R_API char *r_cons_hud_string(const char *s, const bool usecolor) {
+R_API char *r_cons_hud_string(const char *s) {
 	char *os, *track, *ret, *o = strdup (s);
 	if (!o) {
 		return NULL;
@@ -41,7 +43,7 @@ R_API char *r_cons_hud_string(const char *s, const bool usecolor) {
 			os = o + i + 1;
 		}
 	}
-	ret = r_cons_hud (fl, NULL, usecolor);
+	ret = r_cons_hud (fl, NULL);
 	free (o);
 	r_list_free (fl);
 	return ret;
@@ -52,7 +54,7 @@ R_API char *r_cons_hud_string(const char *s, const bool usecolor) {
    entry. If all words are present, the function returns true.
    The mask is a character buffer wich is filled by 'x' to mark those characters
    that match the filter */
-static bool strmatch(char *entry, char *filter, char* mask, const int mask_size) {
+static bool strmatch(char *entry, char *filter, char *mask, const int mask_size) {
 	char *p, *current_token = filter;
 	const char *filter_end = filter + strlen (filter);
 	// first we separate the filter in words (include the terminator char
@@ -74,8 +76,8 @@ static bool strmatch(char *entry, char *filter, char* mask, const int mask_size)
 			while ((next_match = r_str_casestr (entry_ptr, current_token))) {
 				int i;
 				for (i = next_match - entry;
-					(i < next_match - entry + token_len) && i < mask_size;
-					i++) {
+				     (i < next_match - entry + token_len) && i < mask_size;
+				     i++) {
 					mask[i] = 'x';
 				}
 				entry_ptr += token_len;
@@ -93,10 +95,14 @@ static bool strmatch(char *entry, char *filter, char* mask, const int mask_size)
 
 // Display a list of entries in the hud, filtered and emphasized based
 // on the user input.
-R_API char *r_cons_hud(RList *list, const char *prompt, const bool usecolor) {
+R_API char *r_cons_hud(RList *list, const char *prompt) {
 	const int buf_size = 128;
 	int ch, nch, first_line, current_entry_n, j, i = 0;
-	char *p, *x, user_input[buf_size], mask[buf_size];
+	char *p, *x;
+#ifdef _MSC_VER
+#define buf_size 128
+#endif
+	char user_input[buf_size], mask[buf_size];
 	int last_color_change, top_entry_n = 0;
 	char *selected_entry = NULL;
 	char tmp, last_mask = 0;
@@ -121,7 +127,7 @@ R_API char *r_cons_hud(RList *list, const char *prompt, const bool usecolor) {
 		r_cons_printf ("%d> %s|\n", top_entry_n, user_input);
 		int counter = 0;
 		int rows;
-		(void)r_cons_get_size (&rows);
+		(void) r_cons_get_size (&rows);
 		// Iterate over each entry in the list
 		r_list_foreach (list, iter, current_entry) {
 			memset (mask, 0, buf_size);
@@ -143,7 +149,7 @@ R_API char *r_cons_hud(RList *list, const char *prompt, const bool usecolor) {
 						r_cons_printf (" %c %s\n", first_line? '-': ' ', current_entry);
 					} else {
 						// otherwise we need to emphasize the matching part
-						if (usecolor) {
+						if (I (use_color)) {
 							last_color_change = 0;
 							last_mask = 0;
 							r_cons_printf (" %c ", first_line? '-': ' ');
@@ -154,25 +160,26 @@ R_API char *r_cons_hud(RList *list, const char *prompt, const bool usecolor) {
 									tmp = p[j];
 									p[j] = 0;
 									if (mask[j]) {
-										r_cons_printf (Color_RESET"%s", p + last_color_change);
+										r_cons_printf (Color_RESET "%s", p + last_color_change);
 									} else {
-										r_cons_printf (Color_GREEN"%s", p + last_color_change);
+										r_cons_printf (Color_GREEN "%s", p + last_color_change);
 									}
 									p[j] = tmp;
 									last_color_change = j;
 									last_mask = mask[j];
-								} 
+								}
 							}
 							if (last_mask) {
-								r_cons_printf (Color_GREEN"%s\n"Color_RESET, p + last_color_change);
+								r_cons_printf (Color_GREEN "%s\n"Color_RESET, p + last_color_change);
 							} else {
-								r_cons_printf (Color_RESET"%s\n", p + last_color_change);
+								r_cons_printf (Color_RESET "%s\n", p + last_color_change);
 							}
 						} else {
 							// Otherwise we print the matching characters uppercase
 							for (j = 0; p[j]; j++) {
-								if (mask[j])
-									p[j] = toupper ((unsigned char)p[j]);
+								if (mask[j]) {
+									p[j] = toupper ((unsigned char) p[j]);
+								}
 							}
 							r_cons_printf (" %c %s\n", first_line? '-': ' ', p);
 						}
@@ -184,7 +191,7 @@ R_API char *r_cons_hud(RList *list, const char *prompt, const bool usecolor) {
 					}
 					if (first_line) {
 						selected_entry = current_entry;
-					}	
+					}
 					first_line = 0;
 				}
 				current_entry_n++;
@@ -194,7 +201,7 @@ R_API char *r_cons_hud(RList *list, const char *prompt, const bool usecolor) {
 		r_cons_visual_flush ();
 		ch = r_cons_readchar ();
 		nch = r_cons_arrow_to_hjkl (ch);
-		(void)r_cons_get_size (&rows);
+		(void) r_cons_get_size (&rows);
 		if (nch == 'J' && ch != 'J') {
 			top_entry_n += (rows - 1);
 			if (top_entry_n + 1 >= current_entry_n) {
@@ -215,34 +222,36 @@ R_API char *r_cons_hud(RList *list, const char *prompt, const bool usecolor) {
 			}
 		} else {
 			switch (ch) {
-			case 9: // \t
+			case 9:	// \t
 				if (top_entry_n + 1 < current_entry_n) {
 					top_entry_n++;
 				} else {
 					top_entry_n = 0;
 				}
 				break;
-			case 10: // \n
-			case 13: // \r
+			case 10:// \n
+			case 13:// \r
 				top_entry_n = 0;
-				//		if (!*buf)
-				//			return NULL;
+				// if (!*buf)
+				// return NULL;
 				if (current_entry_n >= 1) {
-					//eprintf ("%s\n", buf);
-					//i = buf[0] = 0;
+					// eprintf ("%s\n", buf);
+					// i = buf[0] = 0;
 					return strdup (selected_entry);
-				} // no match!
+				}	// no match!
 				break;
-			case 23: // ^w
+			case 23:// ^w
 				top_entry_n = 0;
 				i = user_input[0] = 0;
 				break;
-			case 0x1b: // ESC
+			case 0x1b:	// ESC
 				return NULL;
-			case 8:   // bs
-			case 127: // bs
+			case 8:		// bs
+			case 127:	// bs
 				top_entry_n = 0;
-				if (i < 1) return NULL;
+				if (i < 1) {
+					return NULL;
+				}
 				user_input[--i] = 0;
 				break;
 			default:
@@ -266,7 +275,7 @@ R_API char *r_cons_hud(RList *list, const char *prompt, const bool usecolor) {
 }
 
 // Display the list of files in a directory
-R_API char *r_cons_hud_path(const char *path, int dir, const bool usecolor) {
+R_API char *r_cons_hud_path(const char *path, int dir) {
 	char *tmp, *ret = NULL;
 	RList *files;
 	if (path) {
@@ -277,15 +286,15 @@ R_API char *r_cons_hud_path(const char *path, int dir, const bool usecolor) {
 	}
 	files = r_sys_dir (tmp);
 	if (files) {
-		ret = r_cons_hud (files, tmp, usecolor);
+		ret = r_cons_hud (files, tmp);
 		if (ret) {
-			tmp = r_str_concat (tmp, "/");
-			tmp = r_str_concat (tmp, ret);
+			tmp = r_str_append (tmp, "/");
+			tmp = r_str_append (tmp, ret);
 			ret = r_file_abspath (tmp);
 			free (tmp);
 			tmp = ret;
 			if (r_file_is_directory (tmp)) {
-				ret = r_cons_hud_path (tmp, dir, usecolor);
+				ret = r_cons_hud_path (tmp, dir);
 				free (tmp);
 				tmp = ret;
 			}

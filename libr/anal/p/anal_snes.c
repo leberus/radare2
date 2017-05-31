@@ -6,10 +6,13 @@
 #include <r_asm.h>
 #include <r_anal.h>
 #include "../../asm/arch/snes/snes_op_table.h"
+#include "../../asm/p/asm_snes.h"
+
+static struct snes_asm_flags* snesflags = NULL;
 
 static int snes_anop(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, int len) {
 	memset (op, '\0', sizeof (RAnalOp));
-	op->size = snes_op_get_size(anal->bits, &snes_op[data[0]]);
+	op->size = snes_op_get_size(snesflags->M, snesflags->X, &snes_op[data[0]]);
 	if (op->size > len)
 		return op->size = 0;
 	op->nopcode = 1;
@@ -149,7 +152,7 @@ static int snes_anop(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, int l
 		break;
 	case 0x4c: // jmp addr
 		op->eob = true;
-		op->jump = ut8p_bw (data+1);
+		op->jump = (addr & 0xFF0000) | ut8p_bw (data + 1);
 		op->type = R_ANAL_OP_TYPE_JMP;
 		break;
 	case 0x5c: // jmp long
@@ -164,7 +167,7 @@ static int snes_anop(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, int l
 		break;
 	case 0x82: // brl
 		op->eob = true;
-		op->jump = addr + 3 + (st16)ut8p_bw (data+1);
+		op->jump = addr + 3 + (st16)ut8p_bw (data + 1);
 		op->type = R_ANAL_OP_TYPE_JMP;
 		break;
 	case 0x6c: // jmp (addr)
@@ -199,7 +202,7 @@ static int snes_anop(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, int l
 		op->type = R_ANAL_OP_TYPE_CJMP;
 		break;
 	case 0x20: // jsr addr
-		op->jump = ut8p_bw (data+1);
+		op->jump = (addr & 0xFF0000) | ut8p_bw (data+1);
 		op->type = R_ANAL_OP_TYPE_CALL;
 		break;
 	case 0x22: // jsr long
@@ -215,16 +218,38 @@ static int snes_anop(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, int l
 		op->eob = true;
 		op->type = R_ANAL_OP_TYPE_RET;
 		break;
+	case 0xc2: // rep
+		if ( ((st8)data[1]) & 0x10 ) snesflags->X = 0;
+		if ( ((st8)data[1]) & 0x20 ) snesflags->M = 0;
+		break;
+	case 0xe2: // sep
+		if ( ((st8)data[1]) & 0x10 ) snesflags->X = 1;
+		if ( ((st8)data[1]) & 0x20 ) snesflags->M = 1;
+		break;
 	}
 	return op->size;
 }
 
-struct r_anal_plugin_t r_anal_plugin_snes = {
+static int snes_anal_init (void* user) {
+	if (!snesflags) snesflags = malloc(sizeof( struct snes_asm_flags ));
+	memset(snesflags,0,sizeof (struct snes_asm_flags));
+	return 0;
+}
+
+static int snes_anal_fini (void* user) {
+	free(snesflags);
+	snesflags = NULL;
+	return 0;
+}
+
+RAnalPlugin r_anal_plugin_snes = {
 	.name = "snes",
 	.desc = "SNES analysis plugin",
 	.license = "LGPL3",
 	.arch = "snes",
 	.bits = 16,
+	.init = snes_anal_init,
+	.fini = snes_anal_fini,
 	.op = &snes_anop,
 };
 

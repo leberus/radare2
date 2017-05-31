@@ -4,7 +4,9 @@
 #include "r_util.h"
 #include "r_print.h"
 #include "r_reg.h"
-
+#ifdef _MSC_VER
+#include <time.h>
+#endif 
 #define NOPTR 0
 #define PTRSEEK 1
 #define PTRBACK 2
@@ -1095,6 +1097,9 @@ static void r_print_format_enum (const RPrint* p, ut64 seeki, char* fmtname,
 
 static void r_print_format_register (const RPrint* p, int mode,
 		const char *name, const char* setval) {
+	if (!p || !p->get_register || !p->reg) {
+		return;
+	}
 	RRegItem *ri = p->get_register (p->reg, name, R_REG_TYPE_ALL);
 	if (ri) {
 		if (MUSTSET) {
@@ -1238,8 +1243,8 @@ int r_print_format_struct_size(const char *f, RPrint *p, int mode) {
 	}
 
 	i = 0;
-	if (fmt[i] >= '0' && fmt[i] <= '9') {
-		while (fmt[i] >= '0' && fmt[i] <= '9') {
+	if (IS_DIGIT(fmt[i])) {
+		while (IS_DIGIT(fmt[i])) {
 			i++;
 		}
 	}
@@ -1329,7 +1334,7 @@ int r_print_format_struct_size(const char *f, RPrint *p, int mode) {
 					tmp = *format;
 				}
 			} else {
-				format = r_strht_get (p->formats, structname + 1);
+				format = sdb_get (p->formats, structname + 1, NULL);
 			}
 			size += tabsize * r_print_format_struct_size (format, p, mode);
 			free (structname);
@@ -1421,7 +1426,7 @@ static int r_print_format_struct(RPrint* p, ut64 seek, const ut8* b, int len, co
 	if (anon) {
 		fmt = name;
 	} else {
-		fmt = r_strht_get (p->formats, name);
+		fmt = sdb_get (p->formats, name, NULL);
 	}
 	if (!fmt || !*fmt) {
 		eprintf ("Undefined struct '%s'.\n", name);
@@ -1474,11 +1479,11 @@ R_API int r_print_format(RPrint *p, ut64 seek, const ut8* b, const int len,
 	if (!formatname) {
 		return 0;
 	}
-	fmt = r_strht_get (p->formats, formatname);
+	fmt = sdb_get (p->formats, formatname, NULL);
 	if (!fmt) {
 		fmt = formatname;
 	}
-	while (*fmt && iswhitechar (*fmt)) fmt++;
+	while (*fmt && ISWHITECHAR (*fmt)) fmt++;
 	argend = fmt + strlen (fmt);
 	arg = fmt;
 
@@ -1501,7 +1506,7 @@ R_API int r_print_format(RPrint *p, ut64 seek, const ut8* b, const int len,
 	/* get times */
 	otimes = times = atoi (arg);
 	if (times > 0) {
-		while (*arg >= '0' && *arg <= '9') {
+		while (IS_DIGIT(*arg)) {
 			arg++;
 		}
 	}
@@ -1557,7 +1562,7 @@ R_API int r_print_format(RPrint *p, ut64 seek, const ut8* b, const int len,
 	if (mode == R_PRINT_JSON && slide == 0) {
 		p->cb_printf ("[");
 	}
-	if (arg[0] == '0') {
+	if (mode && arg[0] == '0') {
 		mode |= R_PRINT_UNIONMODE;
 		arg++;
 	} else {
@@ -1592,7 +1597,7 @@ R_API int r_print_format(RPrint *p, ut64 seek, const ut8* b, const int len,
 					p->cb_printf (",");
 				}
 				p->cb_printf ("[{\"index\":%d,\"offset\":%d},", otimes-times, seek+i);
-			} else {
+			} else if (mode) {
 				p->cb_printf ("0x%08"PFMT64x" [%d] {\n", seek+i, otimes-times);
 			}
 		}
@@ -1642,7 +1647,7 @@ R_API int r_print_format(RPrint *p, ut64 seek, const ut8* b, const int len,
 
 			tmp = *arg;
 
-			if (!args) {
+			if (mode && !args) {
 				mode |= R_PRINT_ISFIELD;
 			}
 			if (mode & R_PRINT_MUSTSEE && otimes > 1) {
@@ -1672,11 +1677,11 @@ R_API int r_print_format(RPrint *p, ut64 seek, const ut8* b, const int len,
 						goto beach;
 					}
 				}
-				if (!args || (!field && ofield != MINUSONE)
+				if (mode && (!args || (!field && ofield != MINUSONE)
 						|| (field && !strncmp (field, fieldname, \
 							strchr (field, '[')
 						? strchr (field, '[') - field
-						: strlen (field) + 1))) {
+						: strlen (field) + 1)))) {
 					mode |= R_PRINT_ISFIELD;
 				} else {
 					mode &= ~R_PRINT_ISFIELD;
@@ -1861,7 +1866,10 @@ R_API int r_print_format(RPrint *p, ut64 seek, const ut8* b, const int len,
 			/* format chars */
 			// before to enter in the switch statement check buf boundaries due to  updateAddr
 			// might go beyond its len and it's usually called in each of the following functions
+#if 0
+// those boundaries are wrong. the fix was not correct, we need a reproducer
 			if (((i+3)<len) || (i+7)<len) {
+#endif
 				switch (tmp) {
 				case 'u':
 					i += r_print_format_uleb (p, endian, mode, setval, seeki, buf, i, size);
@@ -2021,7 +2029,7 @@ R_API int r_print_format(RPrint *p, ut64 seek, const ut8* b, const int len,
 							}
 						}
 						while (size--) {
-							if (elem == -1 || elem == 0) {
+							if (mode && (elem == -1 || elem == 0)) {
 								mode |= R_PRINT_MUSTSEE;
 								if (elem == 0) {
 									elem = -2;
@@ -2089,10 +2097,12 @@ R_API int r_print_format(RPrint *p, ut64 seek, const ut8* b, const int len,
 					invalid = 1;
 					break;
 				} //switch
+#if 0
 			} else {
-				eprintf ("r_print_format: Likely a heap buffer overflow\n");
+				eprintf ("r_print_format: Likely a heap buffer overflow (%s)\n", buf);
 				goto beach;
 			}
+#endif
 			if (mode & R_PRINT_DOT) {
 				p->cb_printf ("}");
 			}
@@ -2108,13 +2118,16 @@ R_API int r_print_format(RPrint *p, ut64 seek, const ut8* b, const int len,
 			last = tmp;
 		}
 		if (otimes > 1) {
-			if (MUSTSEEJSON) p->cb_printf ("]");
-			else p->cb_printf ("}\n");
+			if (MUSTSEEJSON) {
+				p->cb_printf ("]");
+			} else if (mode) {
+				p->cb_printf ("}\n");
+			}
 		}
 		arg = orig;
 		oldslide = 0;
 	}
-	if (mode & R_PRINT_JSON && slide==0) {
+	if (mode & R_PRINT_JSON && slide == 0) {
 		p->cb_printf("]\n");
 	}
 	if (mode & R_PRINT_DOT) {

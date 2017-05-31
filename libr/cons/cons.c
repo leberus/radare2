@@ -1,4 +1,4 @@
-/* radare2 - LGPL - Copyright 2008-2016 - pancake */
+/* radare2 - LGPL - Copyright 2008-2017 - pancake */
 
 #include <r_cons.h>
 #include <r_print.h>
@@ -64,6 +64,9 @@ static inline void r_cons_write(const char *buf, int len) {
 		}
 	}
 #else
+	if (I.fdout < 1) {
+		I.fdout = 1;
+	}
 	(void) write (I.fdout, buf, len);
 #endif
 }
@@ -265,7 +268,7 @@ static HANDLE h;
 static BOOL __w32_control(DWORD type) {
 	if (type == CTRL_C_EVENT) {
 		break_signal (2); // SIGINT
-		eprintf("{ctrl+c} pressed.\n");
+		eprintf ("{ctrl+c} pressed.\n");
 		return true;
 	}
 	return false;
@@ -310,6 +313,7 @@ R_API RCons *r_cons_new() {
 	I.event_interrupt = NULL;
 	I.is_wine = -1;
 	I.fps = 0;
+	I.use_color = false;
 	I.blankline = true;
 	I.teefile = NULL;
 	I.fix_columns = 0;
@@ -510,7 +514,7 @@ R_API const char *r_cons_get_buffer() {
 }
 
 R_API void r_cons_filter() {
-	/* grep*/
+	/* grep */
 	if (I.grep.nstrings > 0 || I.grep.tokens_used || I.grep.less || I.grep.json) {
 		r_cons_grepbuf (I.buffer, I.buffer_len);
 	}
@@ -518,18 +522,22 @@ R_API void r_cons_filter() {
 	/* TODO */
 }
 
-
 R_API void r_cons_push() {
 	if (I.cons_stack) {
 		RConsStack *data = R_NEW0 (RConsStack);
-		data->buf = malloc (I.buffer_len);
-		if (!data->buf) {
-			free (data);
+		if (!data) {
 			return;
 		}
-		memcpy (data->buf, I.buffer, I.buffer_len);
-		data->buf_len = I.buffer_len;
-		data->buf_size = I.buffer_sz;
+		if (I.buffer) {
+			data->buf = malloc (I.buffer_sz);
+			if (!data->buf) {
+				free (data);
+				return;
+			}
+			memcpy (data->buf, I.buffer, I.buffer_sz);
+			data->buf_len = I.buffer_len;
+			data->buf_size = I.buffer_sz;
+		}
 		data->grep = R_NEW0 (RConsGrep);
 		if (data->grep) {
 			memcpy (data->grep, &I.grep, sizeof (RConsGrep));
@@ -548,24 +556,16 @@ R_API void r_cons_push() {
 R_API void r_cons_pop() {
 	if (I.cons_stack) {
 		RConsStack *data = (RConsStack *)r_stack_pop (I.cons_stack);
-		char *tmp;
 		if (!data) {
 			return;
 		}
-		if (!data->buf) {
-			free (data);
-			return;
-		}
-		tmp = malloc (data->buf_size);
-		if (!tmp) {
-			cons_stack_free ((void *)data);
-			return;
-		}
 		free (I.buffer);
-		I.buffer = tmp;
-		memcpy (I.buffer, data->buf, data->buf_len);
+		I.buffer = data->buf ? malloc (data->buf_size) : NULL;
 		I.buffer_len = data->buf_len;
 		I.buffer_sz = data->buf_size;
+		if (I.buffer) {
+			memcpy (I.buffer, data->buf, data->buf_size);
+		}
 		if (data->grep) {
 			memcpy (&I.grep, data->grep, sizeof (RConsGrep));
 			if (data->grep->str) {
@@ -793,16 +793,14 @@ club:
 		written = vsnprintf (I.buffer + I.buffer_len, size, format, ap);
 		if (written >= size) { /* not all bytes were written */
 			palloc (written);
-			va_copy (ap, ap2);
-			va_copy (ap2, ap);
 			written = vsnprintf (I.buffer + I.buffer_len, written, format, ap2);
 			if (written >= size) {
 				palloc (written);
 				goto club;
 			}
-			va_end (ap2);
 		}
 		I.buffer_len += written;
+		I.buffer[I.buffer_len] = 0;
 	} else {
 		r_cons_strcat (format);
 	}
@@ -811,6 +809,9 @@ club:
 
 R_API void r_cons_printf(const char *format, ...) {
 	va_list ap;
+	if (!format || !*format) {
+		return;
+	}
 	va_start (ap, format);
 	r_cons_printf_list (format, ap);
 	va_end (ap);
@@ -843,7 +844,7 @@ R_API int r_cons_memcat(const char *str, int len) {
 	if (I.flush) {
 		r_cons_flush ();
 	}
-	if (I.break_word && str) {
+	if (I.break_word && str && len > 0) {
 		if (r_mem_mem ((const ut8*)str, len, (const ut8*)I.break_word, I.break_word_len)) {
 			I.breaked = true;
 		}
@@ -875,9 +876,13 @@ R_API void r_cons_newline() {
 	if (!I.null) {
 		r_cons_strcat ("\n");
 	}
-#if __WINDOWS__
-	r_cons_reset_colors();
-#endif
+// This place is wrong to manage the color reset, can interfire with r2pipe output sending resetchars
+//  and break json output appending extra chars.
+// this code now is managed into output.c:118 at function r_cons_w32_print
+// now the console color is reset with each \n (same stuff do it here but in correct place ... i think)
+//#if __WINDOWS__
+	//r_cons_reset_colors();
+//#endif
 	//if (I.is_html) r_cons_strcat ("<br />\n");
 }
 
@@ -889,7 +894,7 @@ R_API int r_cons_get_cursor(int *rows) {
 	for (i = 0; i < I.buffer_len; i++) {
 		// ignore ansi chars, copypasta from r_str_ansi_len
 		if (I.buffer[i] == 0x1b) {
-			char ch2 = I.buffer[i+1];
+			char ch2 = I.buffer[i + 1];
 			char *str = I.buffer;
 			if (ch2 == '\\') {
 				i++;
@@ -943,7 +948,6 @@ R_API bool r_cons_isatty() {
 // XXX: if this function returns <0 in rows or cols expect MAYHEM
 R_API int r_cons_get_size(int *rows) {
 #if __WINDOWS__ && !__CYGWIN__
-	char buffer[1024];
 	CONSOLE_SCREEN_BUFFER_INFO csbi;
 	GetConsoleScreenBufferInfo (GetStdHandle (STD_OUTPUT_HANDLE), &csbi);
 	I.columns = (csbi.srWindow.Right - csbi.srWindow.Left) - 1;
@@ -1115,7 +1119,7 @@ R_API void r_cons_set_cup(int enable) {
 }
 
 R_API void r_cons_column(int c) {
-	char *b = malloc (I.buffer_len+1);
+	char *b = malloc (I.buffer_len + 1);
 	if (!b) {
 		return;
 	}
@@ -1125,7 +1129,7 @@ R_API void r_cons_column(int c) {
 	// align current buffer N chars right
 	r_cons_strcat_justify (b, c, 0);
 	r_cons_gotoxy (0, 0);
-	free(b);
+	free (b);
 }
 
 static int lasti = 0; /* last interactive mode */
@@ -1219,6 +1223,9 @@ R_API char *r_cons_lastline (int *len) {
 
 /* swap color from foreground to background, returned value must be freed */
 R_API char *r_cons_swap_ground(const char *col) {
+	if (!col) {
+		return NULL;
+	}
 	if (!strncmp (col, "\x1b[48;5;", 7)) {
 		/* rgb background */
 		return r_str_newf ("\x1b[38;5;%s", col+7);

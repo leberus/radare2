@@ -8,14 +8,14 @@
 #undef PE_VWord
 
 #ifdef R_BIN_PE64
-#define PE_(name) Pe64_##name 
+#define PE_(name) Pe64_ ## name
 #define ILT_MASK1 0x8000000000000000LL
 #define ILT_MASK2 0x7fffffffffffffffLL
 #define PE_Word ut16
 #define PE_DWord ut64
 #define PE_VWord ut32
 #else
-#define PE_(name) Pe32_##name 
+#define PE_(name) Pe32_ ## name
 #define ILT_MASK1 0x80000000
 #define ILT_MASK2 0x7fffffff
 #define PE_Word ut16
@@ -103,16 +103,16 @@ typedef struct {
 #define PE_IMAGE_FILE_UP_SYSTEM_ONLY           0x4000
 #define PE_IMAGE_FILE_BYTES_REVERSED_HI        0x8000
 
-#define IMAGE_DLLCHARACTERISTICS_HIGH_ENTROPY_VA	0x0020
+#define IMAGE_DLLCHARACTERISTICS_HIGH_ENTROPY_VA        0x0020
 #define IMAGE_DLL_CHARACTERISTICS_DYNAMIC_BASE          0x0040
 #define IMAGE_DLL_CHARACTERISTICS_FORCE_INTEGRITY       0x0080
 #define IMAGE_DLL_CHARACTERISTICS_NX_COMPAT             0x0100
 #define IMAGE_DLLCHARACTERISTICS_NO_ISOLATION           0x0200
 #define IMAGE_DLLCHARACTERISTICS_NO_SEH                 0x0400
 #define IMAGE_DLLCHARACTERISTICS_NO_BIND                0x0800
-#define IMAGE_DLLCHARACTERISTICS_APPCONTAINER		0x1000
+#define IMAGE_DLLCHARACTERISTICS_APPCONTAINER           0x1000
 #define IMAGE_DLLCHARACTERISTICS_WDM_DRIVER             0x2000
-#define IMAGE_DLLCHARACTERISTICS_GUARD_CF  		0x4000
+#define IMAGE_DLLCHARACTERISTICS_GUARD_CF               0x4000
 #define IMAGE_DLLCHARACTERISTICS_TERMINAL_SERVER_AWARE  0x8000
 
 #define IMAGE_DEBUG_TYPE_CODEVIEW 2
@@ -158,6 +158,103 @@ typedef struct {
 #define PE_IMAGE_SUBSYSTEM_EFI_ROM                 13
 #define PE_IMAGE_SUBSYSTEM_XBOX                    14
 
+//language
+
+#define LANG_NEUTRAL       0x00
+#define LANG_INVARIANT     0x7f
+#define LANG_AFRIKAANS     0x36
+#define LANG_ALBANIAN      0x1c
+#define LANG_ARABIC        0x01
+#define LANG_ARMENIAN      0x2b
+#define LANG_ASSAMESE      0x4d
+#define LANG_AZERI         0x2c
+#define LANG_BASQUE        0x2d
+#define LANG_BELARUSIAN    0x23
+#define LANG_BENGALI       0x45
+#define LANG_BULGARIAN     0x02
+#define LANG_CATALAN       0x03
+#define LANG_CHINESE       0x04
+#define LANG_CROATIAN      0x1a
+#define LANG_CZECH         0x05
+#define LANG_DANISH        0x06
+#define LANG_DIVEHI        0x65
+#define LANG_DUTCH         0x13
+#define LANG_ENGLISH       0x09
+#define LANG_ESTONIAN      0x25
+#define LANG_FAEROESE      0x38
+#define LANG_FARSI         0x29
+#define LANG_FINNISH       0x0b
+#define LANG_FRENCH        0x0c
+#define LANG_GALICIAN      0x56
+#define LANG_GEORGIAN      0x37
+#define LANG_GERMAN        0x07
+#define LANG_GREEK         0x08
+#define LANG_GUJARATI      0x47
+#define LANG_HEBREW        0x0d
+#define LANG_HINDI         0x39
+#define LANG_HUNGARIAN     0x0e
+#define LANG_ICELANDIC     0x0f
+#define LANG_INDONESIAN    0x21
+#define LANG_ITALIAN       0x10
+#define LANG_JAPANESE      0x11
+#define LANG_KANNADA       0x4b
+#define LANG_KASHMIRI      0x60
+#define LANG_KAZAK         0x3f
+#define LANG_KONKANI       0x57
+#define LANG_KOREAN        0x12
+#define LANG_KYRGYZ        0x40
+#define LANG_LATVIAN       0x26
+#define LANG_LITHUANIAN    0x27
+#define LANG_MACEDONIAN    0x2f
+#define LANG_MALAY         0x3e
+#define LANG_MALAYALAM     0x4c
+#define LANG_MANIPURI      0x58
+#define LANG_MARATHI       0x4e
+#define LANG_MONGOLIAN     0x50
+#define LANG_NEPALI        0x61
+#define LANG_NORWEGIAN     0x14
+#define LANG_ORIYA         0x48
+#define LANG_POLISH        0x15
+#define LANG_PORTUGUESE    0x16
+#define LANG_PUNJABI       0x46
+#define LANG_ROMANIAN      0x18
+#define LANG_RUSSIAN       0x19
+#define LANG_SANSKRIT      0x4f
+#define LANG_SERBIAN       0x1a
+#define LANG_SINDHI        0x59
+#define LANG_SLOVAK        0x1b
+#define LANG_SLOVENIAN     0x24
+#define LANG_SPANISH       0x0a
+#define LANG_SWAHILI       0x41
+#define LANG_SWEDISH       0x1d
+#define LANG_SYRIAC        0x5a
+#define LANG_TAMIL         0x49
+#define LANG_TATAR         0x44
+#define LANG_TELUGU        0x4a
+#define LANG_THAI          0x1e
+#define LANG_TURKISH       0x1f
+#define LANG_UKRAINIAN     0x22
+#define LANG_URDU          0x20
+#define LANG_UZBEK         0x43
+#define LANG_VIETNAMESE    0x2a
+#define LANG_GAELIC        0x3c
+#define LANG_MALTESE       0x3a
+#define LANG_MAORI         0x28
+#define LANG_RHAETO_ROMANCE 0x17
+#define LANG_SAAMI         0x3b
+#define LANG_SORBIAN       0x2e
+#define LANG_SUTU          0x30
+#define LANG_TSONGA        0x31
+#define LANG_TSWANA        0x32
+#define LANG_VENDA         0x33
+#define LANG_XHOSA         0x34
+#define LANG_ZULU          0x35
+#define LANG_ESPERANTO     0x8f
+#define LANG_WALON         0x90
+#define LANG_CORNISH       0x91
+#define LANG_WELSH         0x92
+#define LANG_BRETON        0x93
+
 typedef struct {
 	ut32 VirtualAddress;
 	ut32 Size;
@@ -166,8 +263,8 @@ typedef struct {
 typedef struct {
 	/* Standard fields */
 	ut16 Magic;
-	ut8  MajorLinkerVersion;
-	ut8  MinorLinkerVersion;
+	ut8 MajorLinkerVersion;
+	ut8 MinorLinkerVersion;
 	ut32 SizeOfCode;
 	ut32 SizeOfInitializedData;
 	ut32 SizeOfUninitializedData;
@@ -202,8 +299,8 @@ typedef struct {
 typedef struct {
 	/* Standard fields */
 	ut16 Magic;
-	ut8  MajorLinkerVersion;
-	ut8  MinorLinkerVersion;
+	ut8 MajorLinkerVersion;
+	ut8 MinorLinkerVersion;
 	ut32 SizeOfCode;
 	ut32 SizeOfInitializedData;
 	ut32 SizeOfUninitializedData;
@@ -233,6 +330,45 @@ typedef struct {
 	ut32 NumberOfRvaAndSizes;
 	Pe64_image_data_directory DataDirectory[PE_IMAGE_DIRECTORY_ENTRIES];
 } Pe64_image_optional_header;
+
+typedef struct {
+	ut32 HeaderSize;
+	ut16 MajorRuntimeVersion;
+	ut16 MinorRuntimeVersion;
+	ut32 MetaDataDirectoryAddress;
+	ut32 MetaDataDirectorySize;
+	ut32 Flags;
+	ut32 EntryPointToken;
+	ut32 ResourcesDirectoryAddress;
+	ut32 ResourcesDirectorySize;
+	ut32 StrongNameSignatureAddress;
+	ut32 StrongNameSignatureSize;
+	ut32 CodeManagerTableAddress;
+	ut32 CodeManagerTableSize;
+	ut32 VTableFixupsAddress;
+	ut32 VTableFixupsSize;
+	ut32 ExportAddressTableJumpsAddress;
+	ut32 ExportAddressTableJumpsSize;
+	ut32 ManagedNativeHeaderAddress;
+	ut32 ManagedNativeHeaderSize;
+} Pe32_image_clr_header, Pe64_image_clr_header;
+
+typedef struct {
+	ut64 Signature;
+	ut16 MajorVersion;
+	ut16 MinorVersion;
+	ut32 Reserved;
+	ut32 VersionStringLength;
+	char* VersionString;
+	ut16 Flags;
+	ut16 NumberOfStreams;
+} Pe32_image_metadata_header, Pe64_image_metadata_header;
+
+typedef struct {
+	ut32 Offset;
+	ut32 Size;
+	char* Name;
+} Pe32_image_metadata_stream, Pe64_image_metadata_stream;
 
 #define PE_IMAGE_SIZEOF_SHORT_NAME 8
 
@@ -334,8 +470,8 @@ typedef struct {
 typedef struct {
 	union {
 		struct {
-			ut32 NameOffset:31;
-			ut32 NameIsString:1;
+			ut32 NameOffset: 31;
+			ut32 NameIsString: 1;
 		} s;
 		ut32 Name;
 		ut16 Id;
@@ -343,8 +479,8 @@ typedef struct {
 	union {
 		ut32 OffsetToData;
 		struct {
-			ut32 OffsetToDirectory:31;
-			ut32 DataIsDirectory:1;
+			ut32 OffsetToDirectory: 31;
+			ut32 DataIsDirectory: 1;
 		} s;
 	} u2;
 } Pe_image_resource_directory_entry;
@@ -355,12 +491,12 @@ typedef struct {
 // "Yes, even PE files intended for non-UNICODE Win32 implementations use UNICODE here."
 typedef struct {
 	ut16 Length;
-	char *NameString;
+	char* NameString;
 } Pe_image_resource_directory_string;
 
 typedef struct {
 	ut16 Length;
-	ut16 *NameString;
+	ut16* NameString;
 } Pe_image_resource_directory_string_u;
 
 typedef struct {
@@ -370,6 +506,9 @@ typedef struct {
 	ut32 Reserved;
 } Pe_image_resource_data_entry;
 
+
+//resource types
+#define R_PE_MAX_RESOURCES 2056
 #define PE_RESOURCE_ENTRY_CURSOR          1
 #define PE_RESOURCE_ENTRY_BITMAP          2
 #define PE_RESOURCE_ENTRY_ICON            3
@@ -419,52 +558,52 @@ typedef struct {
 	ut16 wValueLength; //The size, in words, of the Value member.
 	ut16 wType; //1 text; 0 binary
 	ut16 wKeyLen;
-	ut16 *szKey; //An arbitrary Unicode string
+	ut16* szKey; //An arbitrary Unicode string
 	//ut16 Padding;
-	ut16 *Value; //A zero-terminated string.
+	ut16* Value; //A zero-terminated string.
 } String;
 
 typedef struct {
 	ut16 wLength; //The length, in bytes, of this StringTable structure, including all structures indicated by the Children member.
 	ut16 wValueLength; //always 0
 	ut16 wType; //1 text; 0 binary
-	ut16 *szKey;
-		//An 8-digit hexadecimal number stored as a Unicode string.
-		//The four most significant digits represent the language identifier.
-		//The four least significant digits represent the code page for which the data is formatted
+	ut16* szKey;
+	//An 8-digit hexadecimal number stored as a Unicode string.
+	//The four most significant digits represent the language identifier.
+	//The four least significant digits represent the code page for which the data is formatted
 	//ut16 Padding;
 	ut32 numOfChildren;
-	String **Children; //An array of one or more String structures
+	String** Children; //An array of one or more String structures
 } StringTable;
 
 typedef struct {
 	ut16 wLength; //The length, in bytes, of the entire StringFileInfo block, including all structures indicated by the Children member.
 	ut16 wValueLength; //always 0
 	ut16 wType; //1 text; 0 binary
-	ut16 *szKey; //L"StringFileInfo"
+	ut16* szKey; //L"StringFileInfo"
 	//ut16 Padding;
 	ut32 numOfChildren;
-	StringTable **Children; //An array of one or more StringTable structures
+	StringTable** Children; //An array of one or more StringTable structures
 } StringFileInfo;
 
 typedef struct {
 	ut16 wLength; //The length, in bytes, of the Var structure. (with pad)
 	ut16 wValueLength; //The length, in bytes, of the Value member.
 	ut16 wType; //1 text; 0 binary
-	ut16 *szKey; //L"Translation"
+	ut16* szKey; //L"Translation"
 	//ut16 Padding;
 	ut32 numOfValues;
-	ut32 *Value; //An array of one or more values that are language and code page identifier pairs
+	ut32* Value; //An array of one or more values that are language and code page identifier pairs
 } Var;
 
 typedef struct {
 	ut16 wLength; //The length, in bytes, of the entire VarFileInfo block, including all structures indicated by the Children member. (with pad)
 	ut16 wValueLength; //always 0
 	ut16 wType; //1 text; 0 binary
-	ut16 *szKey; //L"VarFileInfo"
+	ut16* szKey; //L"VarFileInfo"
 	//ut16 Padding;
 	ut32 numOfChildren;
-	Var **Children; //Typically contains a list of languages that the application or DLL supports.
+	Var** Children; //Typically contains a list of languages that the application or DLL supports.
 } VarFileInfo;
 
 #define PE_VS_FF_DEBUG        0x00000001L
@@ -533,15 +672,15 @@ typedef struct {
 } PE_VS_FIXEDFILEINFO;
 
 typedef struct {
-	ut16             wLength; //whole structure size (padding not included (in case of multiply version info structures))
-	ut16             wValueLength; //if 0 there is no Value
-	ut16             wType; //1 text; 0 binary
-	ut16             *szKey; //L"VS_VERSION_INFO"
+	ut16 wLength;             //whole structure size (padding not included (in case of multiply version info structures))
+	ut16 wValueLength;             //if 0 there is no Value
+	ut16 wType;             //1 text; 0 binary
+	ut16* szKey;             //L"VS_VERSION_INFO"
 	//ut16             Padding1; //pad for 32 boundary
-	PE_VS_FIXEDFILEINFO *Value;
+	PE_VS_FIXEDFILEINFO* Value;
 	//ut16             Padding2; //pad for 32 boundary
-	VarFileInfo      *varFileInfo; //0 or 1 elements
-	StringFileInfo   *stringFileInfo; //0 or 1 elements
+	VarFileInfo* varFileInfo;      //0 or 1 elements
+	StringFileInfo* stringFileInfo;   //0 or 1 elements
 } PE_VS_VERSIONINFO;
 
 #endif

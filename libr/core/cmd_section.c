@@ -1,22 +1,22 @@
-/* radare - LGPL - Copyright 2009-2016 - pancake */
+/* radare - LGPL - Copyright 2009-2017 - pancake */
 
 #include "r_cons.h"
 #include "r_core.h"
 #include "r_types.h"
 #include "r_io.h"
 
-static int __dump_sections_to_disk(RCore *core) {
-	char file[128];
+static bool dumpSectionsToDisk(RCore *core) {
+	char file[512];
 	RListIter *iter;
 	RIOSection *s;
 
 	r_list_foreach (core->io->sections, iter, s) {
 		ut8 *buf = malloc (s->size);
-		r_io_read_at (core->io, s->offset, buf, s->size);
-		snprintf (file, sizeof(file),
+		r_io_read_at (core->io, s->paddr, buf, s->size);
+		snprintf (file, sizeof (file),
 			"0x%08"PFMT64x"-0x%08"PFMT64x"-%s.dmp",
 			s->vaddr, s->vaddr+s->size,
-			r_str_rwx_i (s->rwx));
+			r_str_rwx_i (s->flags));
 		if (!r_file_dump (file, buf, s->size, 0)) {
 			eprintf ("Cannot write '%s'\n", file);
 			free (buf);
@@ -25,32 +25,36 @@ static int __dump_sections_to_disk(RCore *core) {
 		eprintf ("Dumped %d bytes into %s\n", (int)s->size, file);
 		free (buf);
 	}
-	return false;
+	return true;
 }
 
-static int __dump_section_to_disk(RCore *core, char *file) {
+static bool dumpSectionToDisk(RCore *core, char *file) {
 	char *heapfile = NULL;
-	ut64 o = core->offset;
 	RListIter *iter;
 	RIOSection *s;
 	int len = 128;
+	if (!core || !file) {
+		return false;
+	}
+	ut64 o = core->offset;
 	if (core->io->va || core->io->debug) {
 		o = r_io_section_vaddr_to_maddr_try (core->io, o);
 	}
 	r_list_foreach (core->io->sections, iter, s) {
-		if (o >= s->offset && o < s->offset + s->size) {
+		if (o >= s->paddr && o < s->paddr + s->size) {
 			ut8 *buf = malloc (s->size);
-			r_io_read_at (core->io, s->offset, buf, s->size);
+			r_io_read_at (core->io, s->paddr, buf, s->size);
 			if (!file) {
-				heapfile = (char *)malloc (len * sizeof(char));
+				heapfile = (char *)malloc (len);
 				if (!heapfile) {
+					free (buf);
 					return false;
 				}
 				file = heapfile;
 				snprintf (file, len,
 					"0x%08"PFMT64x"-0x%08"PFMT64x"-%s.dmp",
 					s->vaddr, s->vaddr + s->size,
-					r_str_rwx_i (s->rwx));
+					r_str_rwx_i (s->flags));
 			}
 			if (!r_file_dump (file, buf, s->size, 0)) {
 				eprintf ("Cannot write '%s'\n", file);
@@ -143,7 +147,7 @@ static int cmd_section(void *data, const char *input) {
 	case 'j': // "Sj"
 		r_core_cmd0 (core, "iSj");
 		break;
-	case 'a':
+	case 'a': // "Sa"
 		switch (input[1]) {
 		case '\0':
 			{
@@ -223,18 +227,20 @@ static int cmd_section(void *data, const char *input) {
 		int len = 128;
 		switch (input[1]) {
 		case 0:
-			__dump_section_to_disk (core, NULL);
+			(void) dumpSectionToDisk (core, NULL);
 			break;
 		case ' ':
 			if (input[2]) {
-				file = (char *)malloc(len * sizeof(char));
-				snprintf (file, len, "%s", input + 2);
+				file = (char *)calloc (len, sizeof (char));
+				if (file) {
+					snprintf (file, len, "%s", input + 2);
+				}
 			}
-			__dump_section_to_disk (core, file);
+			(void) dumpSectionToDisk (core, file);
 			free (file);
 			break;
 		case 'a':
-			__dump_sections_to_disk (core);
+			(void)dumpSectionsToDisk (core);
 			break;
 		}
 		}
@@ -252,7 +258,7 @@ static int cmd_section(void *data, const char *input) {
 			o = r_io_section_vaddr_to_maddr_try (core->io, o);
 		}
 		r_list_foreach (core->io->sections, iter, s) {
-			if (o >= s->offset && o < s->offset + s->size) {
+			if (o >= s->paddr && o < s->paddr + s->size) {
 				int sz;
 				char *buf = r_file_slurp (input + 2, &sz);
 				// TODO: use mmap here. we need a portable implementation
@@ -347,7 +353,7 @@ static int cmd_section(void *data, const char *input) {
 			break;
 		}
 		break;
-	case '=':
+	case '=': // "S="
 		r_io_section_list_visual (core->io, core->offset, core->blocksize,
 					r_config_get_i (core->config, "scr.color"),
 					r_cons_get_size (NULL));
@@ -361,7 +367,7 @@ static int cmd_section(void *data, const char *input) {
 				o = r_io_section_vaddr_to_maddr_try (core->io, o);
 			}
 			r_list_foreach_safe (core->io->sections, iter, iter2, s) {
-				if (o >= s->offset && o < s->offset + s->size) {
+				if (o >= s->paddr && o < s->paddr + s->size) {
 					r_io_section_rm (core->io, s->id);
 					if (input[2] != '*') {
 						break;
@@ -375,13 +381,29 @@ static int cmd_section(void *data, const char *input) {
 			if (core->io->va || core->io->debug) {
 				o = r_io_section_vaddr_to_maddr_try (core->io, o);
 			}
-			r_list_foreach (core->io->sections, iter, s) {
-				if (o >= s->offset && o < s->offset + s->size) {
-					r_cons_printf ("0x%08"PFMT64x" 0x%08"PFMT64x" %s\n",
-						s->offset + s->vaddr,
-						s->offset + s->vaddr + s->size,
-						s->name);
-					break;
+			if (input[1] == 'j') { // "S.j"
+				r_cons_printf ("[");
+				r_list_foreach (core->io->sections, iter, s) {
+					if (o >= s->paddr && o < s->paddr + s->size) {
+						char *name = r_str_escape (s->name);
+						r_cons_printf ("{\"start\":%" PFMT64u ",\"end\":%" PFMT64u ",\"name\":\"%s\"}",
+							s->paddr + s->vaddr,
+							s->paddr + s->vaddr + s->size,
+							name);
+						free (name);
+						break;
+					}
+				}
+				r_cons_printf ("]");
+			} else {
+				r_list_foreach (core->io->sections, iter, s) {
+					if (o >= s->paddr && o < s->paddr + s->size) {
+						r_cons_printf ("0x%08"PFMT64x" 0x%08"PFMT64x" %s\n",
+							s->paddr + s->vaddr,
+							s->paddr + s->vaddr + s->size,
+							s->name);
+						break;
+					}
 				}
 			}
 		}

@@ -34,17 +34,22 @@
 #if !USE_LIB_MAGIC
 
 #include <r_util.h>
-#include <sys/param.h>
-#include <assert.h>
 #include <ctype.h>
-#include <dirent.h>
+#ifndef _MSC_VER
+#include <sys/param.h>
+#endif
 #if __UNIX__
 #define QUICK 1
 #include <sys/mman.h>
 #endif
 #include "file.h"
 #include "patchlevel.h"
-
+#ifdef _MSC_VER
+#include <sys\stat.h>
+#define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
+#define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
+#define MAXPATHLEN 255
+#endif
 #define	EATAB {while (isascii((ut8) *l) && isspace((ut8) *l))  ++l;}
 #define LOWCASE(l) (isupper((ut8) (l)) ? tolower((ut8) (l)) : (l))
 
@@ -158,10 +163,14 @@ static int get_type(const char *l, const char **t) {
 static void init_file_tables(void) {
 	static int done = 0;
 	const struct type_tbl_s *p;
-	if (done) return;
+	if (done) {
+		return;
+	}
 	done++;
 	for (p = type_tbl; p->len; p++) {
-		assert(p->type < FILE_NAMES_SIZE);
+		if (p->type > FILE_NAMES_SIZE) {
+			continue;
+		}
 		magic_file_names[p->type] = p->name;
 		magic_file_formats[p->type] = p->format;
 	}
@@ -501,12 +510,20 @@ static void load_1(RMagic *ms, int action, const char *file, int *errs, struct r
 static int apprentice_load(RMagic *ms, struct r_magic **magicp, ut32 *nmagicp, const char *fn, int action) {
 	ut32 marraycount, i, mentrycount = 0, starttest;
 	struct r_magic_entry *marray;
-	char subfn[MAXPATHLEN];
-	struct dirent *d;
 	struct stat st;
 	int errs = 0;
+#if !__WINDOWS__
 	DIR *dir;
-
+	struct dirent *d;
+	char subfn[MAXPATHLEN];
+#else	
+	HANDLE hdir;
+	WIN32_FIND_DATAW entry;
+	wchar_t dir[MAX_PATH];
+	wchar_t *wcpath;
+	char *cfname;
+	char subfn[1024];	
+#endif
 	ms->flags |= R_MAGIC_CHECK;	/* Enable checks for parsed files */
 
         maxmagic = MAXMAGIS;
@@ -526,6 +543,28 @@ static int apprentice_load(RMagic *ms, struct r_magic **magicp, ut32 *nmagicp, c
 			free (marray);
 			return  -1;
 		}
+#if __WINDOWS__ && !defined(__CYGWIN__)
+		if ((wcpath = r_utf8_to_utf16 (fn))) {
+			swprintf (dir, sizeof (dir), L"%ls\\*.*", wcpath);
+			hdir = FindFirstFileW (dir, &entry);
+			if (!(hdir == INVALID_HANDLE_VALUE)) {
+				do {
+					if (wcsncmp (entry.cFileName, L".", 1) == 0) continue;
+					if ((cfname = r_utf16_to_utf8 (entry.cFileName))) {
+						snprintf (subfn, sizeof (subfn), "%s/%s", fn, cfname);
+						if (stat (subfn, &st) == 0 && S_ISREG (st.st_mode)) {
+							load_1 (ms, action, subfn, &errs, &marray, &marraycount);
+						}
+						free (cfname);
+					}
+				} while (FindNextFileW (hdir, &entry));
+				FindClose (hdir);
+			}
+			free (wcpath);
+		} else {
+			errs++;
+		}
+#else
 		dir = opendir (fn);
 		if (dir) {
 			while ((d = readdir (dir))) {
@@ -536,7 +575,10 @@ static int apprentice_load(RMagic *ms, struct r_magic **magicp, ut32 *nmagicp, c
 				//else perror (subfn);
 			}
 			closedir (dir);
-		} else errs++;
+		} else {
+			errs++;
+		}
+#endif
 	} else load_1 (ms, action, fn, &errs, &marray, &marraycount);
 	if (errs)
 		goto out;
@@ -1329,7 +1371,9 @@ static int check_format(RMagic *ms, struct r_magic *m) {
 		return 1;
 	}
 
-	assert(file_nformats == file_nnames);
+	if (file_nformats != file_nnames) {
+		return -1;
+	}		
 
 	if (m->type >= file_nformats) {
 		file_magwarn(ms, "Internal error inconsistency between "
@@ -1727,7 +1771,7 @@ static int apprentice_compile(RMagic *ms, struct r_magic **magicp, ut32 *nmagicp
 		goto out;
 	}
 
-	if (write(fd, ar, sizeof (ar)) != (ssize_t)sizeof (ar)) {
+	if (write(fd, ar, sizeof (ar)) != (int)sizeof (ar)) {
 		file_error(ms, errno, "error writing `%s'", dbname);
 		goto beach;
 	}
@@ -1739,7 +1783,7 @@ static int apprentice_compile(RMagic *ms, struct r_magic **magicp, ut32 *nmagicp
 	}
 
 	if (write(fd, *magicp, (sizeof (struct r_magic) * *nmagicp))
-	    != (ssize_t)(sizeof (struct r_magic) * *nmagicp)) {
+	    != (int)(sizeof (struct r_magic) * *nmagicp)) {
 		file_error(ms, errno, "error writing `%s'", dbname);
 		goto beach;
 	}

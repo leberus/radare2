@@ -331,7 +331,7 @@ static const ut8 *r_bin_dwarf_parse_lnp_header (
 				if (hdr->file_names) {
 					hdr->file_names[count].name = calloc (sizeof(char), namelen);
 					snprintf (hdr->file_names[count].name, namelen - 1,
-						"%s/%s", include_dir, filename);
+						"%s/%s", include_dir? include_dir : "", filename);
 					hdr->file_names[count].name[namelen - 1] = '\0';
 					free (allocated_id);
 					hdr->file_names[count].id_idx = id_idx;
@@ -1454,7 +1454,7 @@ R_API int r_bin_dwarf_parse_info(RBinDwarfDebugAbbrev *da, RBin *a, int mode) {
 		debug_str = getsection (a, "debug_str");
 		if (debug_str) {
 			debug_str_len = debug_str->size;
-			debug_str_buf = calloc (1, debug_str_len);
+			debug_str_buf = calloc (1, debug_str_len + 1);
 			ret = r_buf_read_at (binfile->buf, debug_str->paddr,
 					     debug_str_buf, debug_str_len);
 			if (!ret) {

@@ -63,9 +63,8 @@ static int meta_inrange_add (RAnal *a, ut64 addr, int size) {
 static int meta_inrange_del (RAnal *a, ut64 addr, int size) {
 	int set = 0;
 	char key[64];
-	ut64 base, base2;
-	base = META_RANGE_BASE (addr);
-	base2 = META_RANGE_BASE (addr+size);
+	ut64 base = META_RANGE_BASE (addr);
+	ut64 base2 = META_RANGE_BASE (addr+size);
 // TODO: optimize this thing?
 	for (; base<base2; base += META_RANGE_SIZE) {
 		snprintf (key, sizeof (key)-1, "range.0x%"PFMT64x, base);
@@ -112,6 +111,11 @@ R_API int r_meta_set_string(RAnal *a, int type, ut64 addr, const char *s) {
 		ret = true;
 	} else {
 		ret = false;
+	}
+	if (a->log) {
+		char *msg = r_str_newf (":C%c %s @ 0x%"PFMT64x, type, s, addr);
+		a->log (a, msg);
+		free (msg);
 	}
 	e_str = sdb_encode ((const void*)s, -1);
 	snprintf (val, sizeof (val)-1, "%d,%d,%s", (int)size, space_idx, e_str);
@@ -217,6 +221,8 @@ R_API int r_meta_del(RAnal *a, int type, ut64 addr, ut64 size, const char *str) 
 		"meta.C.0x%"PFMT64x : "meta.0x%"PFMT64x, addr);
 	ptr = sdb_const_get (DB, key, 0);
 	if (ptr) {
+		sdb_unset (DB, key, 0);
+		snprintf (key, sizeof (key) - 1, "meta.%c.0x%"PFMT64x, type, addr);
 		sdb_unset (DB, key, 0);
 		#if 0
 		// This code is wrong, but i guess it's necessary in case type is ANY

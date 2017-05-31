@@ -1,11 +1,11 @@
-/* radare - LGPL - Copyright 2009-2016 - pancake, nibble */
+/* radare - LGPL - Copyright 2009-2017 - pancake, nibble */
 
 #include <stdio.h>
 #include <r_types.h>
 #include <r_util.h>
 #include <r_asm.h>
 #include <spp/spp.h>
-#include "../config.h"
+#include <config.h>
 
 R_LIB_VERSION (r_asm);
 
@@ -143,6 +143,7 @@ R_API RAsm *r_asm_new() {
 	if (!a) {
 		return NULL;
 	}
+	a->dataalign = 1;
 	a->bits = R_SYS_BITS;
 	a->syntax = R_ASM_SYNTAX_INTEL;
 	a->plugins = r_list_newf ((RListFree)plugin_free);
@@ -198,6 +199,7 @@ R_API RAsm *r_asm_free(RAsm *a) {
 		}
 		free (a->cpu);
 		sdb_free (a->pair);
+		ht_free (a->flags);
 		a->pair = NULL;
 		free (a);
 	}
@@ -231,7 +233,6 @@ R_API int r_asm_del(RAsm *a, const char *name) {
 	/* TODO: Implement r_asm_del */
 	return false;
 }
-
 
 R_API int r_asm_is_valid(RAsm *a, const char *name) {
 	RAsmPlugin *h;
@@ -559,15 +560,14 @@ R_API RAsmCode* r_asm_mdisassemble(RAsm *a, const ut8 *buf, int len) {
 		return r_asm_code_free (acode);
 	}
 	memcpy (acode->buf, buf, len);
-	if (!(acode->buf_hex = malloc (2 * len+1))) {
+	if (!(acode->buf_hex = calloc (2, len + 1))) {
 		return r_asm_code_free (acode);
 	}
 	r_hex_bin2str (buf, len, acode->buf_hex);
-	if (!(acode->buf_asm = malloc (4))) {
+	if (!(buf_asm = r_strbuf_new (NULL))) {
 		return r_asm_code_free (acode);
 	}
-	buf_asm = r_strbuf_new (NULL);
-	for (idx = ret = slen = 0, acode->buf_asm[0] = '\0'; idx < len; idx += ret) {
+	for (idx = ret = slen = 0; idx < len; idx += ret) {
 		r_asm_set_pc (a, pc + idx);
 		ret = r_asm_disassemble (a, &op, buf + idx, len - idx);
 		if (ret < 1) {
@@ -614,6 +614,17 @@ R_API RAsmCode* r_asm_assemble_file(RAsm *a, const char *file) {
 	return ac;
 }
 
+static void flag_free_kv(HtKv *kv) {
+	free (kv->key);
+	free (kv->value);
+	free (kv);
+}
+
+static char* dup_val(void *v) {
+	char *str = strdup ((char *)v);
+	return str;
+}
+
 R_API RAsmCode* r_asm_massemble(RAsm *a, const char *buf) {
 	int labels = 0, num, stage, ret, idx, ctr, i, j, linenum = 0;
 	char *lbuf = NULL, *ptr2, *ptr = NULL, *ptr_start = NULL;
@@ -622,6 +633,9 @@ R_API RAsmCode* r_asm_massemble(RAsm *a, const char *buf) {
 	RAsmOp op = {0};
 	ut64 off, pc;
 	if (!buf) {
+		return NULL;
+	}
+	if (!(a->flags = ht_new (dup_val, flag_free_kv, NULL))) {
 		return NULL;
 	}
 	if (!(acode = r_asm_code_new ())) {
@@ -673,7 +687,7 @@ R_API RAsmCode* r_asm_massemble(RAsm *a, const char *buf) {
 				lbuf = r_str_replace (lbuf, aa, val, 1);
 				free (aa);
 			}
-			p = strstr (p+5, "$sys.");
+			p = strstr (p + 5, "$sys.");
 		}
 	}
 	if (strchr (lbuf, ':')) {
@@ -721,7 +735,7 @@ R_API RAsmCode* r_asm_massemble(RAsm *a, const char *buf) {
 					isavrseparator (*ptr_start); ptr_start++);
 			} else {
 				for (ptr_start = buf_token; *ptr_start &&
-					isseparator (*ptr_start); ptr_start++);
+					ISSEPARATOR (*ptr_start); ptr_start++);
 			}
 			if (!strncmp (ptr_start, "/*", 2)) {
 				if (!strstr (ptr_start + 2, "*/")) {
@@ -760,6 +774,8 @@ R_API RAsmCode* r_asm_massemble(RAsm *a, const char *buf) {
 							off += (acode->code_align - (off % acode->code_align));
 						}
 						snprintf (food, sizeof (food), "0x%"PFMT64x"", off);
+
+						ht_insert (a->flags, ptr_start, food);
 						// TODO: warning when redefined
 						r_asm_code_set_equ (acode, ptr_start, food);
 					}
@@ -777,7 +793,7 @@ R_API RAsmCode* r_asm_massemble(RAsm *a, const char *buf) {
 				ptr = ptr_start;
 				if (!strncmp (ptr, ".intel_syntax", 13)) {
 					a->syntax = R_ASM_SYNTAX_INTEL;
-				} else if (!strncmp (ptr, ".att_syntax", 10)) {
+				} else if (!strncmp (ptr, ".att_syntax", 11)) {
 					a->syntax = R_ASM_SYNTAX_ATT;
 				} else if (!strncmp (ptr, ".endian", 7)) {
 					r_asm_set_big_endian (a, atoi (ptr + 7));
@@ -791,7 +807,7 @@ R_API RAsmCode* r_asm_massemble(RAsm *a, const char *buf) {
 				} else if (!strncmp (ptr, ".string ", 8)) {
 					r_str_chop (ptr + 8);
 					ret = r_asm_pseudo_string (&op, ptr + 8, 1);
-				} else if (!strncmp (ptr, ".ascii ", 6)) {
+				} else if (!strncmp (ptr, ".ascii", 6)) {
 					ret = r_asm_pseudo_string (&op, ptr + 7, 0);
 				} else if (!strncmp (ptr, ".align", 6)) {
 					ret = r_asm_pseudo_align (acode, &op, ptr + 7);

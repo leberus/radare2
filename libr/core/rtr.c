@@ -2,6 +2,8 @@
 
 #include "r_core.h"
 #include "r_socket.h"
+#include "gdb/include/libgdbr.h"
+#include "gdb/include/gdbserver/core.h"
 
 #if 0
 SECURITY IMPLICATIONS
@@ -356,11 +358,11 @@ static char *rtr_dir_files (const char *path) {
 	eprintf ("Listing directory %s\n", path);
 	r_list_foreach (files, iter, file) {
 		if (file[0] == '.') continue;
-		ptr = r_str_concatf (ptr, "<a href=\"%s%s\">%s</a><br />\n",
+		ptr = r_str_appendf (ptr, "<a href=\"%s%s\">%s</a><br />\n",
 			path, file, file);
 	}
 	r_list_free (files);
-	return r_str_concat (ptr, "</body></html>\n");
+	return r_str_append (ptr, "</body></html>\n");
 }
 
 #if __UNIX__
@@ -385,7 +387,7 @@ static void activateDieTime (RCore *core) {
 // return 1 on error
 static int r_core_rtr_http_run(RCore *core, int launch, const char *path) {
 	RConfig *newcfg = NULL, *origcfg = NULL;
-	char headers[128] = {0};
+	char headers[128] = R_EMPTY;
 	RSocketHTTPRequest *rs;
 	char buf[32];
 	int ret = 0;
@@ -467,7 +469,10 @@ static int r_core_rtr_http_run(RCore *core, int launch, const char *path) {
 	core->config = newcfg;
 
 	r_config_set (core->config, "asm.cmtright", "false");
+#if 0
+	// WHY
 	r_config_set (core->config, "scr.html", "true");
+#endif
 	r_config_set (core->config, "scr.color", "false");
 	r_config_set (core->config, "asm.bytes", "false");
 	r_config_set (core->config, "scr.interactive", "false");
@@ -580,7 +585,6 @@ static int r_core_rtr_http_run(RCore *core, int launch, const char *path) {
 				"Access-Control-Allow-Headers: Origin, "
 				"X-Requested-With, Content-Type, Accept\n");
 		}
-
 		if (!strcmp (rs->method, "OPTIONS")) {
 			r_socket_http_response (rs, 200, "", 0, headers);
 		} else if (!strcmp (rs->method, "GET")) {
@@ -635,7 +639,9 @@ static int r_core_rtr_http_run(RCore *core, int launch, const char *path) {
 					httpref_enabled = false;
 				}
 
-				while (*cmd == '/') cmd++;
+				while (*cmd == '/') {
+					cmd++;
+				}
 				if (httpref_enabled && (!rs->referer || (refstr && !strstr (rs->referer, refstr)))) {
 					r_socket_http_response (rs, 503, "", 0, headers);
 				} else {
@@ -708,8 +714,8 @@ static int r_core_rtr_http_run(RCore *core, int launch, const char *path) {
 				}
 				// FD IS OK HERE
 				if (rs->path [strlen (rs->path) - 1] == '/') {
-					path = r_str_concat (path, "index.html");
-					//rs->path = r_str_concat (rs->path, "index.html");
+					path = r_str_append (path, "index.html");
+					//rs->path = r_str_append (rs->path, "index.html");
 				} else {
 					//snprintf (path, sizeof (path), "%s/%s", root, rs->path);
 					if (r_file_is_directory (path)) {
@@ -829,6 +835,13 @@ static int r_core_rtr_http_thread (RThread *th) {
 	}
 	int ret = r_core_rtr_http_run (ht->core, ht->launch, ht->path);
 	R_FREE (ht->path);
+	if (ret) {
+		int p = r_config_get_i (ht->core->config, "http.port");
+		r_config_set_i (ht->core->config, "http.port",  p + 1);
+		if (p >= r_config_get_i (ht->core->config, "http.maxport")) {
+			return false;
+		}
+	}
 	return ret;
 }
 
@@ -860,8 +873,12 @@ R_API int r_core_rtr_http(RCore *core, int launch, const char *path) {
 			eprintf ("TODO: Visual mode should be enabled on local\n");
 		} else {
 			const char *tpath = r_str_trim_const (path + 1);
-			HttpThread ht = { core, launch, strdup (tpath) };
-			httpthread = r_th_new (r_core_rtr_http_thread, &ht, false);
+			//HttpThread ht = { core, launch, strdup (tpath) };
+			HttpThread *ht = calloc (sizeof (HttpThread), 1);
+			ht->core = core;
+			ht->launch = launch;
+			ht->path = strdup (tpath);
+			httpthread = r_th_new (r_core_rtr_http_thread, ht, false);
 			r_th_start (httpthread, true);
 			eprintf ("Background http server started.\n");
 		}
@@ -870,6 +887,198 @@ R_API int r_core_rtr_http(RCore *core, int launch, const char *path) {
 	do {
 		ret = r_core_rtr_http_run (core, launch, path);
 	} while (ret == -2);
+	return ret;
+}
+
+static int r_core_rtr_gdb_cb(void *core_ptr, const char *cmd, char *out_buf, size_t max_len) {
+	int ret;
+	RList *list;
+	RListIter *iter;
+	RRegItem *reg_item;
+	int reg_size;
+	ut64 reg_value;
+	utX reg_value_big;
+	ut64 m_off;
+	if (!core_ptr || ! cmd) {
+		return -1;
+	}
+	RCore *core = (RCore*) core_ptr;
+	switch (cmd[0]) {
+	case 'd':
+		switch (cmd[1]) {
+		case 'p': // dp
+			switch (cmd[2]) {
+			case '\0': // dp
+				// TODO support multiprocess
+				snprintf (out_buf, max_len - 1, "QC%x", core->dbg->tid);
+				return 0;
+			case 't': // dpt
+				r_core_cmd (core, cmd, 0);
+				return 0;
+			}
+			break;
+		case 'r': // dr
+			if (!(list = r_reg_get_list (core->dbg->reg, R_REG_TYPE_GPR))) {
+				return -1;
+			}
+			ret = 0;
+			if ((reg_size = r_config_get_i (core->config, "asm.bits")) == 0) {
+				return -1;
+			}
+			r_list_foreach (list, iter, reg_item) {
+				// TODO thumb (ref. - dreg.c:140)
+				if (reg_item->size != reg_size) {
+					continue;
+				}
+				if (reg_size < 80) {
+					reg_value = r_reg_get_value (core->dbg->reg, reg_item);
+					if (!(r_config_get_i (core->config, "cfg.bigendian"))) {
+						reg_value = r_swap_ut64 (reg_value);
+					}
+					snprintf (out_buf + ret, max_len - ret - 1, "%016"PFMT64x, reg_value);
+				} else {
+					reg_value = r_reg_get_value_big (core->dbg->reg, reg_item, &reg_value_big);
+					switch (reg_size) {
+					case 80:
+						if (!(r_config_get_i (core->config, "cfg.bigendian"))) {
+							snprintf (out_buf + ret, max_len - ret - 1, "%016"PFMT64x"%04x",
+								  r_swap_ut64 (reg_value_big.v80.Low), r_swap_ut16 (reg_value_big.v80.High));
+							break;
+						}
+						snprintf (out_buf + ret, max_len - ret - 1, "%04x%016"PFMT64x,
+							  reg_value_big.v80.High, reg_value_big.v80.Low);
+						break;
+					case 96:
+						if (!(r_config_get_i (core->config, "cfg.bigendian"))) {
+							snprintf (out_buf + ret, max_len - ret - 1, "%016"PFMT64x"%08x",
+								  r_swap_ut64 (reg_value_big.v80.Low), r_swap_ut32 (reg_value_big.v80.High));
+							break;
+						}
+						snprintf (out_buf + ret, max_len - ret - 1, "%08x%016"PFMT64x,
+							  reg_value_big.v96.High, reg_value_big.v96.Low);
+						break;
+					case 128:
+						if (!(r_config_get_i (core->config, "cfg.bigendian"))) {
+							snprintf (out_buf + ret, max_len - ret - 1, "%016"PFMT64x"%016"PFMT64x,
+								  r_swap_ut64 (reg_value_big.v80.Low), r_swap_ut64 (reg_value_big.v80.High));
+							break;
+						}
+						snprintf (out_buf + ret, max_len - ret - 1, "%016"PFMT64x"%016"PFMT64x,
+							  reg_value_big.v128.High, reg_value_big.v128.Low);
+						break;
+					default:
+						return -1;
+					}
+				}
+				ret += reg_size / 4;
+				if (ret >= max_len) {
+					return -1;
+				}
+			}
+			return ret;
+		}
+		break;
+	case 'm':
+		sscanf (cmd + 1, "%"PFMT64x" %d", &m_off, &ret);
+		r_io_read_at (core->io, m_off, (ut8*) out_buf, ret);
+		return ret;
+	}
+	return -1;
+}
+
+// path = "<port> <file_name>"
+static int r_core_rtr_gdb_run(RCore *core, int launch, const char *path) {
+	RSocket *sock;
+	int p, ret;
+	char port[10];
+	const char *file = NULL;
+	libgdbr_t *g;
+	RCoreFile *cf;
+
+	if (!core || !path) {
+		return -1;
+	}
+	while (*path && isspace (*path)) {
+		path++;
+	}
+	if (!*path) {
+		eprintf ("gdbserver: Port not specified\n");
+		return -1;
+	}
+	if (path && (p = atoi (path))) {
+		if (p < 0 || p > 65535) {
+			eprintf ("gdbserver: Invalid port: %s\n", port);
+			return -1;
+		}
+		snprintf (port, sizeof (port) - 1, "%d", p);
+		if (!(file = strchr (path, ' '))) {
+			eprintf ("gdbserver: File not specified\n");
+			return -1;
+		}
+		while (*file && isspace (*file)) {
+			file++;
+		}
+		if (!*file) {
+			eprintf ("gdbserver: File not specified\n");
+			return -1;
+		}
+	}
+
+	if (!(cf = r_core_file_open (core, file, R_IO_READ, 0))) {
+		eprintf ("Cannot open file (%s)\n", file);
+		return -1;
+	}
+	r_core_file_reopen_debug (core, "");
+
+	if (!(sock = r_socket_new (false))) {
+		eprintf ("gdbserver: Could not open socket for listening\n");
+		return -1;
+	}
+	if (!r_socket_listen (sock, port, NULL)) {
+		r_socket_free (sock);
+		eprintf ("gdbserver: Cannot listen on port: %s\n", port);
+		return -1;
+	}
+	if (!(g = R_NEW0(libgdbr_t))) {
+		r_socket_free (sock);
+		eprintf ("gdbserver: Cannot alloc libgdbr instance\n");
+		return -1;
+	}
+	gdbr_init (g);
+	core->gdbserver_up = 1;
+	eprintf ("gdbserver started on port: %s, file: %s\n", port, file);
+
+	while (1) {
+		if (!(g->sock = r_socket_accept (sock))) {
+			break;
+		}
+		g->connected = 1;
+		ret = gdbr_server_serve (g, r_core_rtr_gdb_cb, (void*) core);
+		r_socket_close (g->sock);
+		g->connected = 0;
+		if (ret < 0) {
+			break;
+		}
+	}
+	core->gdbserver_up = 0;
+	gdbr_cleanup (g);
+	free (g);
+	r_socket_free (sock);
+	return 0;
+}
+
+R_API int r_core_rtr_gdb(RCore *core, int launch, const char *path) {
+	int ret;
+	if (r_sandbox_enable (0)) {
+		eprintf ("sandbox: connect disabled\n");
+		return -1;
+	}
+	// TODO: do stuff with launch
+	if (core->gdbserver_up) {
+		eprintf ("gdbserver is already running\n");
+		return -1;
+	}
+	ret = r_core_rtr_gdb_run (core, launch, path);
 	return ret;
 }
 
@@ -897,6 +1106,8 @@ R_API void r_core_rtr_help(RCore *core) {
 	"=h&", " port", "start http server in background)",
 	"=H", " port", "launch browser and listen for http",
 	"=H&", " port", "launch browser and listen for http in background",
+	"\ngdbserver:", "", "",
+	"=g", " port file", "listen on 'port' for debugging 'file' using gdbserver",
 	NULL };
 	r_core_cmd_help (core, help_msg);
 }
@@ -979,7 +1190,7 @@ R_API void r_core_rtr_add(RCore *core, const char *_input) {
 		proto = RTR_PROT_RAP;
 		host = input;
 	}
-	while (*host && iswhitechar (*host))
+	while (*host && ISWHITECHAR (*host))
 		host++;
 
 	if (!(ptr = strchr (host, ':'))) {
@@ -1166,7 +1377,7 @@ R_API void r_core_rtr_add(RCore *core, const char *_input) {
 R_API void r_core_rtr_remove(RCore *core, const char *input) {
 	int fd, i;
 
-	if (input[0] >= '0' && input[0] <= '9') {
+	if (IS_DIGIT(input[0])) {
 		fd = r_num_math (core->num, input);
 		for (i = 0; i < RTR_MAX_HOSTS; i++)
 			if (rtr_host[i].fd && rtr_host[i].fd->fd == fd) {
@@ -1195,7 +1406,7 @@ R_API void r_core_rtr_session(RCore *core, const char *input) {
 	int fd;
 
 	prompt[0] = 0;
-	if (input[0] >= '0' && input[0] <= '9') {
+	if (IS_DIGIT(input[0])) {
 		fd = r_num_math (core->num, input);
 		for (rtr_n = 0; rtr_host[rtr_n].fd \
 			&& rtr_host[rtr_n].fd->fd != fd \
@@ -1268,7 +1479,7 @@ R_API void r_core_rtr_cmd(RCore *core, const char *input) {
 		return;
 	}
 
-	if (*input == '&') {
+	if (*input == '&') { // "=h&"
 		if (rapthread) {
 			eprintf ("RAP Thread is already running\n");
 			eprintf ("This is experimental and probably buggy. Use at your own risk\n");
@@ -1385,7 +1596,7 @@ R_API char *r_core_rtr_cmds_query (RCore *core, const char *host, const char *po
 			int ret = r_socket_read (s, buf, sizeof (buf));
 			if (ret < 1) break;
 			buf[ret] = 0;
-			rbuf = r_str_concat (rbuf, (const char *)buf);
+			rbuf = r_str_append (rbuf, (const char *)buf);
 		}
 	} else {
 		eprintf ("Cannot connect\n");

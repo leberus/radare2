@@ -39,7 +39,7 @@
 
 #include <zlib.h>
 
-#ifdef _WIN32
+#ifdef __WINDOWS__
 #define ZIP_EXTERN 
 //__declspec(dllexport)
 /* for dup(), close(), etc. */
@@ -62,7 +62,7 @@
 #define _zip_rename	rename
 #endif
 
-#ifdef _WIN32
+#ifdef __WINDOWS__
 #if defined(HAVE__CLOSE)
 #define close		_close
 #endif
@@ -94,11 +94,6 @@
 
 #ifndef HAVE_FTELLO
 #define ftello(s)	((long)ftell((s)))
-#endif
-
-#ifndef HAVE_MKSTEMP
-int _zip_mkstemp(char *);
-#define mkstemp _zip_mkstemp
 #endif
 
 #if !defined(HAVE_STRCASECMP)
@@ -146,7 +141,7 @@ int _zip_mkstemp(char *);
 #define ZIP_EF_ZIP64		0x0001
 
 #define ZIP_EF_IS_INTERNAL(id)	((id) == ZIP_EF_UTF_8_COMMENT || (id) == ZIP_EF_UTF_8_NAME || (id) == ZIP_EF_ZIP64)
-
+
 
 /* This section contains API that won't materialize like this.  It's
    placed in the internal section, pending cleanup. */
@@ -206,7 +201,7 @@ struct zip_source *zip_source_window(struct zip *, struct zip_source *,
 
 struct zip_source *zip_source_pop(struct zip_source *);
 
-
+
 
 /* error source for layered sources */
 
@@ -335,7 +330,7 @@ struct zip_extra_field {
     zip_uint8_t *data;
 };
 
-
+
 
 struct zip_source {
     struct zip_source *src;
@@ -357,7 +352,7 @@ struct zip_entry {
     int deleted;
 };
 
-
+
 
 /* file or archive comment, or filename */
 
@@ -369,7 +364,7 @@ struct zip_string {
     zip_uint32_t converted_length;	/* length of converted */
 };
 
-
+
 
 /* which files to write, and in which order (name is for torrentzip sorting) */
 
@@ -378,13 +373,13 @@ struct zip_filelist {
     const char *name;
 };
 
-
+
 
 extern const char * const _zip_err_str[];
 extern const int _zip_nerr_str;
 extern const int _zip_err_type[];
 
-
+
 
 #define ZIP_ENTRY_CHANGED(e, f)	((e)->changes && ((e)->changes->changed & (f)))
 
@@ -392,7 +387,7 @@ extern const int _zip_err_type[];
 
 #define ZIP_IS_RDONLY(za)	((za)->ch_flags & ZIP_AFL_RDONLY)
 
-
+
 
 zip_int64_t _zip_add_entry(struct zip *);
 
@@ -473,7 +468,6 @@ void _zip_string_write(const struct zip_string *, FILE *);
 int _zip_changed(const struct zip *, zip_uint64_t *);
 const char *_zip_get_name(struct zip *, zip_uint64_t, zip_flags_t, struct zip_error *);
 int _zip_local_header_read(struct zip *, int);
-void *_zip_memdup(const void *, size_t, struct zip_error *);
 zip_int64_t _zip_name_locate(struct zip *, const char *, zip_flags_t, struct zip_error *);
 struct zip *_zip_new(struct zip_error *);
 zip_uint16_t _zip_read2(const zip_uint8_t **);

@@ -26,8 +26,8 @@ const int ht_primes_sizes[] = {
 // hashfunction - the function that does the hashing, must not be null.
 // comparator - the function to check if values are equal, if NULL, just checks
 // == (for storing ints).
-// keydup - function to duplicate to key (eg strdup), if NULL just does =.
-// valdup - same as keydup, but for values
+// keydup - function to duplicate to key (eg strdup), if NULL just does strup.
+// valdup - same as keydup, but for values but if NULL just assign
 // pair_free - function for freeing a keyvaluepair - if NULL just does free.
 // calcsize - function to calculate the size of a value. if NULL, just stores 0.
 static SdbHash* internal_ht_new(ut32 size, HashFunction hashfunction,
@@ -43,12 +43,12 @@ static SdbHash* internal_ht_new(ut32 size, HashFunction hashfunction,
 	ht->prime_idx = 0;
 	ht->load_factor = 1;
 	ht->hashfn = hashfunction;
-	ht->cmp = comparator? comparator: (ListComparator)strcmp;
+	ht->cmp = (ListComparator)strcmp;
 	ht->dupkey = keydup? keydup: (DupKey)strdup;
-	ht->dupvalue = valdup? valdup: (DupValue)strdup;
+	ht->dupvalue = valdup? valdup: NULL; 
 	ht->table = calloc (ht->size, sizeof (SdbList*));
 	ht->calcsizeK = calcsizeK? calcsizeK: (CalcSize)strlen;
-	ht->calcsizeV = calcsizeV? calcsizeV: (CalcSize)strlen;
+	ht->calcsizeV = calcsizeV? calcsizeV: NULL;
 	ht->freefn = pair_free;
 	ht->deleted = ls_newf (free);
 #if INSERTORDER
@@ -91,7 +91,9 @@ bool ht_delete_internal(SdbHash* ht, const char* key, ut32* hash) {
 #if EXCHANGE
 			ls_split_iter (list, iter);
 			ls_append (ht->deleted, iter);
-			list->free (iter->data);
+			if (list->free) {
+				list->free (iter->data);
+			}
 			iter->data = NULL;
 #else
 			ls_delete (list, iter);
@@ -103,12 +105,10 @@ bool ht_delete_internal(SdbHash* ht, const char* key, ut32* hash) {
 	return false;
 }
 
-SdbHash* ht_new(HashFunction hashfunction, ListComparator comparator,
-		 DupKey keydup, DupValue valdup, HtKvFreeFunc pair_free,
-		 CalcSize calcsizeK, CalcSize calcsizeV) {
-	HashFunction hfcn = hashfunction ? hashfunction : sdb_hash;
-	return internal_ht_new (ht_primes_sizes[0], hfcn, comparator, keydup,
-				valdup, pair_free, calcsizeK, calcsizeV);
+SdbHash* ht_new(DupValue valdup, HtKvFreeFunc pair_free, CalcSize calcsizeV) {
+	return internal_ht_new (ht_primes_sizes[0], (HashFunction)sdb_hash, 
+	  			(ListComparator)strcmp, (DupKey)strdup,
+				valdup, pair_free, (CalcSize)strlen, calcsizeV);
 }
 
 void ht_free(SdbHash* ht) {
@@ -158,7 +158,7 @@ static void internal_ht_grow(SdbHash* ht) {
 #endif
 
 static bool internal_ht_insert_kv(SdbHash *ht, HtKv *kv, bool update) {
-	bool found;
+	bool found = false;
 	if (!ht || !kv) {
 		return false;
 	}
@@ -198,11 +198,21 @@ static bool internal_ht_insert(SdbHash* ht, bool update, const char* key,
 	HtKv* kv = calloc (1, sizeof (HtKv));
 	if (kv) {
 		kv->key = ht->dupkey ((void *)key);
-		kv->value = ht->dupvalue ((void *)value);
+		if (ht->dupvalue) {
+			kv->value = ht->dupvalue ((void *)value);
+		} else {
+			kv->value = (void *)value;
+		}
 		kv->key_len = ht->calcsizeK ((void *)kv->key);
-		kv->value_len = ht->calcsizeV ((void *)kv->value);
+		if (ht->calcsizeV) {
+			kv->value_len = ht->calcsizeV ((void *)kv->value);
+		} else {
+			kv->value_len = 0;
+		}
 		if (!internal_ht_insert_kv (ht, kv, update)) {
-			ht->freefn (kv);
+			if (ht->freefn) {
+				ht->freefn (kv);
+			}
 			return false;
 		}
 		return true;
@@ -228,10 +238,16 @@ bool ht_update(SdbHash* ht, const char* key, void* value) {
 // If `found` is not NULL, it will be set to true if the entry was found, false
 // otherwise.
 HtKv* ht_find_kv(SdbHash* ht, const char* key, bool* found) {
+	if (!ht) {
+		return NULL;
+	}
 	ut32 hash, bucket;
 	SdbListIter* iter;
 	HtKv* kv;
 #if USE_KEYLEN
+	if (!key) {
+		return NULL;
+	}
 	ut32 key_len = ht->calcsizeK ((void *)key);
 #endif
 	hash = ht->hashfn (key);
@@ -271,4 +287,23 @@ void* ht_find(SdbHash* ht, const char* key, bool* found) {
 // Deletes a entry from the hash table from the key, if the pair exists.
 bool ht_delete(SdbHash* ht, const char* key) {
 	return ht_delete_internal (ht, key, NULL);
+}
+
+void ht_foreach(SdbHash *ht, HtForeachCallback cb, void *user) {
+	if (!ht) {
+		return;
+	}
+	ut32 i = 0;
+	HtKv *kv;
+	SdbListIter *iter;
+	for (i = 0; i < ht->size; i++) {
+		ls_foreach (ht->table[i], iter, kv) {
+			if (!kv || !kv->key || !kv->value) {
+				continue;
+			}
+			if (!cb (user, kv->key, kv->value)) {
+				return;
+			}
+		}
+	}
 }

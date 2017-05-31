@@ -203,3 +203,29 @@ There are 5 minutes from WTF to FIX in r2land
 Quantum dissasemble: it's there as long as you don't observe it
 Ceci n'est pas une r2pipe
 Buy a mac
+(gdb) ^D
+((fn [f s n] (cat [(f f s n) "dare2"])) (fn [f s n] (pr s) (if (> n 0) (f f (cat [s "ra"]) (dec n)) s)) "" Infty)
+There's no way you could crash radare2. No. Way.
+When in doubt, try 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; pd;'
+.-. .- -.. .- .-. . ..---
+Disassemble?! No Disassemble Johnny No. 5!!!
+You crackme up!
+Welcome, "reenigne"
+Search returned no hits. Did you mean 'Misassemble'?
+º|<|<|  -( glu glu glu, im the r2 fish )
+Everybody hates warnings. Mr. Pancake, tear down this -Wall
+TIRED OF WAITING
+We fix bugs while you sleep.
+You find bugs while we sleep.
+The stripping process is not deep enough
+Come here, we are relatively friendly
+Don't wait for Travis
+Your problems are solved in an abandoned branch somewhere
+git blind --hard
+You need some new glasses
+aaaa is experimental
+We feed trolls
+Mind the tab
+Buy a Mac
+You have been designated for disassembly
+Helping siol merge? No way, that would be like.. way too much not lazy. - vifino

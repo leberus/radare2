@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2010-2016 - nibble, pancake */
+/* radare - LGPL - Copyright 2010-2017 - nibble, pancake */
 
 #include <r_anal.h>
 #include <r_util.h>
@@ -54,7 +54,7 @@ R_API int r_anal_diff_fingerprint_bb(RAnal *anal, RAnalBlock *bb) {
 	if (anal->cur && anal->cur->fingerprint_bb) {
 		return (anal->cur->fingerprint_bb (anal, bb));
 	}
-	if (!(bb->fingerprint = malloc (1+bb->size))) {
+	if (!(bb->fingerprint = malloc (1 + bb->size))) {
 		return false;
 	}
 	if (!(buf = malloc (bb->size + 1))) {
@@ -124,7 +124,7 @@ R_API bool r_anal_diff_bb(RAnal *anal, RAnalFunction *fcn, RAnalFunction *fcn2) 
 		ot = 0;
 		mbb = mbb2 = NULL;
 		r_list_foreach (fcn2->bbs, iter2, bb2) {
-			if (bb2->diff && bb2->diff->type == R_ANAL_DIFF_TYPE_NULL) {
+			if (!bb2->diff || bb2->diff->type == R_ANAL_DIFF_TYPE_NULL) {
 				r_diff_buffers_distance (NULL, bb->fingerprint, bb->size,
 						bb2->fingerprint, bb2->size, NULL, &t);
 				if (t > anal->diff_thbb && t > ot) {

@@ -3,6 +3,7 @@
 #include <r_anal.h>
 #include <r_util.h>
 #include <r_list.h>
+#include <limits.h>
 
 #define DFLT_NINSTR 3
 
@@ -23,6 +24,8 @@ R_API RAnalBlock *r_anal_bb_new() {
 	bb->op_pos = R_NEWS0 (ut16, DFLT_NINSTR);
 	bb->op_pos_size = DFLT_NINSTR;
 	bb->parent_reg_arena = NULL;
+	bb->stackptr = 0;
+	bb->parent_stackptr = INT_MAX;
 	return bb;
 }
 
@@ -215,7 +218,7 @@ R_API RAnalBlock *r_anal_bb_get_failbb(RAnalFunction *fcn, RAnalBlock *bb) {
  * If the index of the instruction is not valid, it returns UT16_MAX */
 R_API ut16 r_anal_bb_offset_inst(RAnalBlock *bb, int i) {
 	if (i < 0 || i >= bb->ninstr) return UT16_MAX;
-	return i > 0 ? bb->op_pos[i - 1] : 0;
+	return (i > 0 && (i - 1) < bb->op_pos_size) ? bb->op_pos[i - 1] : 0;
 }
 
 /* set the offset of the i-th instruction in the basicblock bb */

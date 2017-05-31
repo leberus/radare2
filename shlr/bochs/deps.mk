@@ -1,1 +1,1 @@
-LINK+=../../shlr/bochs/lib/libbochs.a
+LINK+=$(STOP)/bochs/lib/libbochs.$(EXT_AR)

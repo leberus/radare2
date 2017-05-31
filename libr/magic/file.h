@@ -34,9 +34,7 @@
 #ifndef __file_h__
 #define __file_h__
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
+#include "mconfig.h"
 #include <r_magic.h>
 
 #include <stdio.h>	/* Include that here, to make sure __P gets defined */
@@ -48,6 +46,9 @@
 /* Do this here and now, because struct stat gets re-defined on solaris */
 #include <sys/stat.h>
 #include <stdarg.h>
+#ifdef _MSC_VER
+typedef unsigned int ssize_t;
+#endif
 
 /* Type for Unicode characters */
 typedef unsigned long unichar;

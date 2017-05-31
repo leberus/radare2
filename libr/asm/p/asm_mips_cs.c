@@ -1,4 +1,4 @@
-/* radare2 - LGPL - Copyright 2013-2016 - pancake */
+/* radare2 - LGPL - Copyright 2013-2017 - pancake */
 
 #include <r_asm.h>
 #include <r_lib.h>
@@ -23,9 +23,13 @@ static int disassemble(RAsm *a, RAsmOp *op, const ut8 *buf, int len) {
 			mode |= CS_MODE_MIPS32R6;
 		} else if (!strcmp (a->cpu, "v3")) {
 			mode |= CS_MODE_MIPS3;
+//		} else if (!strcmp (a->cpu, "gp64")) {
+//			a->bits = 64;
+		} else if (!strcmp (a->cpu, "64v2")) {
+			mode |= CS_MODE_MIPS32 | CS_MODE_MIPS64;
 		}
 	}
-	mode |= (a->bits == 64)? CS_MODE_64: CS_MODE_32;
+	mode |= (a->bits == 64)? CS_MODE_MIPS64 : CS_MODE_MIPS32;
 	memset (op, 0, sizeof (RAsmOp));
 	op->size = 4;
 	if (cd != 0) {

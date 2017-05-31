@@ -14,6 +14,7 @@ int r_sys_setenv(const char *key, const char *value);
 
 #ifdef __WINDOWS__
 #include <io.h>
+#include <r_types_base.h>
 #define popen    _popen
 #define pclose   _pclose
 #define srandom  srand
@@ -27,13 +28,20 @@ int r_sys_setenv(const char *key, const char *value);
 extern int ifl;
 extern int echo[MAXIFL];
 extern int lineno;
+#ifndef DLL_LOCAL
+#ifdef _MSC_VER
+#define DLL_LOCAL
+#else
+#define DLL_LOCAL  __attribute__ ((visibility ("hidden")))
+#endif
+#endif
 
 #define GET_ARG(x,y,i) if (y[i][2]) x = y[i] + 2; else x = y[++i]
 
 #define DEFAULT_PROC(x) \
-struct Tag *tags = (struct Tag *)&x##_tags; \
-struct Arg *args = (struct Arg *)&x##_args; \
-struct Proc *proc = &x##_proc;
+DLL_LOCAL struct Tag *tags = (struct Tag *)&x##_tags; \
+DLL_LOCAL struct Arg *args = (struct Arg *)&x##_args; \
+DLL_LOCAL struct Proc *proc = &x##_proc;
 
 typedef struct {
 	RStrBuf *cout;
@@ -80,8 +88,11 @@ int spp_file(const char *file, Output *out);
 int spp_run(char *buf, Output *out);
 void spp_eval(char *buf, Output *out);
 void spp_io(FILE *in, Output *out);
+#ifdef _MSC_VER
+void do_printf (Output *out, char *str, ...);
+#else
 void do_printf(Output *out, char *str, ...) __attribute__ ((format (printf, 2, 3)));
-
+#endif
 void spp_proc_list();
 void spp_proc_list_kw();
 void spp_proc_set(struct Proc *p, char *arg, int fail);

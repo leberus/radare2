@@ -1,16 +1,9 @@
 #ifndef R_STR_H
 #define R_STR_H
 
-typedef int (*RStrRangeCallback) (void *, int);
+#include "r_str_util.h"
 
-/* TODO ..use as uppercase maybe? they are macros! */
-#define strnull(x) (!x||!*x)
-#define iswhitechar(x) ((x)==' '||(x)=='\t'||(x)=='\n'||(x)=='\r')
-#define iswhitespace(x) ((x)==' '||(x)=='\t')
-#define isseparator(x) ((x)==' '||(x)=='\t'||(x)=='\n'||(x)=='\r'||(x)==' '|| \
-		(x)==','||(x)==';'||(x)==':'||(x)=='['||(x)==']'|| \
-		(x)=='('||(x)==')'||(x)=='{'||(x)=='}')
-#define ishexchar(x) ((x>='0'&&x<='9') ||  (x>='a'&&x<='f') ||  (x>='A'&&x<='F'))
+typedef int (*RStrRangeCallback) (void *, int);
 
 static inline void r_str_rmch(char *s, char ch) {
 	for (;*s; s++) {
@@ -24,6 +17,7 @@ R_API const char *r_str_rchr(const char *base, const char *p, int ch);
 R_API const char *r_str_closer_chr(const char *b, const char *s);
 R_API int r_str_bounds(const char *str, int *h);
 R_API char *r_str_crop(const char *str, unsigned int x, unsigned int y, unsigned int x2, unsigned int y2);
+R_API bool r_str_range_in(const char *r, ut64 addr);
 R_API int r_str_len_utf8(const char *s);
 R_API int r_str_len_utf8char(const char *s, int left);
 R_API void r_str_filter_zeroline(char *str, int len);
@@ -50,7 +44,8 @@ R_API char **r_str_argv(const char *str, int *_argc);
 R_API void r_str_argv_free(char **argv);
 R_API char *r_str_new(const char *str);
 R_API int r_str_is_printable(const char *str);
-R_API char *r_str_concatlen(char *ptr, const char *string, int slen);
+R_API bool r_str_is_printable_incl_newlines(const char *str);
+R_API char *r_str_appendlen(char *ptr, const char *string, int slen);
 R_API char *r_str_newf(const char *fmt, ...);
 R_API char *r_str_newlen(const char *str, int len);
 R_API const char *r_str_bool(int b);
@@ -97,7 +92,7 @@ typedef void(*str_operation)(char *c);
 
 R_API int r_str_do_until_token(str_operation op, char *str, const char tok);
 
-R_API void r_str_const_free();
+R_API void r_str_const_free(void);
 R_API const char *r_str_const(const char *ptr);
 
 R_API int r_str_re_match(const char *str, const char *reg);
@@ -105,6 +100,7 @@ R_API int r_str_re_replace(const char *str, const char *reg, const char *sub);
 R_API int r_str_unescape(char *buf);
 R_API char *r_str_escape(const char *buf);
 R_API char *r_str_escape_dot(const char *buf);
+R_API char *r_str_escape_all(const char *buf);
 R_API void r_str_uri_decode(char *buf);
 R_API char *r_str_uri_encode(const char *buf);
 R_API char *r_str_utf16_decode(const ut8 *s, int len);
@@ -116,9 +112,9 @@ R_API int r_str_nlen_w(const char *s, int n);
 R_API int r_wstr_clen(const char *s);
 R_API char *r_str_prefix(char *ptr, const char *string);
 R_API char *r_str_prefix_all(char *s, const char *pfx);
-R_API char *r_str_concat(char *ptr, const char *string);
-R_API char *r_str_concatf(char *ptr, const char *fmt, ...);
-R_API char *r_str_concatch(char *x, char y);
+R_API char *r_str_append(char *ptr, const char *string);
+R_API char *r_str_appendf(char *ptr, const char *fmt, ...);
+R_API char *r_str_appendch(char *x, char y);
 R_API void r_str_case(char *str, bool up);
 R_API void r_str_chop_path(char *s);
 R_API ut8 r_str_contains_macro(const char *input_value);

@@ -8,7 +8,7 @@
 #include <sys/stat.h>
 #include "sdb.h"
 
-static inline int nextcas() {
+static inline int nextcas(void) {
 	static ut32 cas = 1;
 	if (!cas) {
 		cas++;
@@ -25,7 +25,7 @@ SDB_API void sdb_global_hook(SdbHook hook, void *user) {
 }
 
 // TODO: use mmap instead of read.. much faster!
-SDB_API Sdb* sdb_new0() {
+SDB_API Sdb* sdb_new0(void) {
 	return sdb_new (NULL, NULL, 0);
 }
 
@@ -69,12 +69,12 @@ SDB_API Sdb* sdb_new(const char *path, const char *name, int lock) {
 			break;
 		}
 		if (sdb_open (s, s->dir) == -1) {
-			s->last = sdb_now ();
+			s->last = s->timestamped? sdb_now (): 0LL;
 			// TODO: must fail if we cant open for write in sync
 		}
 		s->name = strdup (name);
 	} else {
-		s->last = sdb_now ();
+		s->last = s->timestamped? sdb_now (): 0LL;
 		s->fd = -1;
 	}
 	s->journal = -1;
@@ -214,7 +214,7 @@ SDB_API const char *sdb_const_get_len(Sdb* s, const char *key, int *vlen, ut32 *
 		if (!kv->value || !*kv->value) {
 			return NULL;
 		}
-		if (kv->expire) {
+		if (s->timestamped && kv->expire) {
 			if (!now) {
 				now = sdb_now ();
 			}
@@ -708,7 +708,6 @@ static bool sdb_foreach_cdb(Sdb *s, SdbForeachCallback cb,
 			free (v);
 			if (kv && kv->key && kv->value) {
 				if (!cb (user, kv->key, kv->value)) {
-					free (v);
 					return false;
 				}
 				if (cb2) {
@@ -929,6 +928,7 @@ SDB_API bool sdb_expire_set(Sdb* s, const char *key, ut64 expire, ut32 cas) {
 	ut32 pos, len;
 	SdbKv *kv;
 	bool found;
+	s->timestamped = true;
 	if (!key) {
 		s->expire = parse_expire (expire);
 		return true;
@@ -1016,7 +1016,7 @@ SDB_API int sdb_hook_call(Sdb *s, const char *k, const char *v) {
 	SdbListIter *iter;
 	SdbHook hook;
 	int i = 0;
-	if (s->last) {
+	if (s->timestamped && s->last) {
 		s->last = sdb_now ();
 	}
 	ls_foreach (s->hooks, iter, hook) {

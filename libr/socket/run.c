@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2014-2016 - pancake */
+/* radare - LGPL - Copyright 2014-2017 - pancake */
 
 /* this helper api is here because it depends on r_util and r_socket */
 /* we should find a better place for it. r_io? */
@@ -7,8 +7,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <r_util.h>
 #include <r_socket.h>
+#include <r_util.h>
 #include <r_lib.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -34,7 +34,6 @@
 #include <sys/ioctl.h>
 #include <sys/resource.h>
 #include <termios.h>
-#include <signal.h>
 #include <grp.h>
 #include <errno.h>
 #if defined(__sun)
@@ -49,6 +48,10 @@
 #include <util.h>
 #endif
 #endif
+#ifdef _MSC_VER
+#include <direct.h>   // to compile chdir in msvc windows
+#include <process.h>  // to compile execv in msvc windows
+#endif
 
 #define HAVE_PTY __UNIX__ && !__ANDROID__ && LIBC_HAVE_FORK && !defined(__sun)
 
@@ -58,10 +61,10 @@
 #endif
 
 R_API RRunProfile *r_run_new(const char *str) {
-	RRunProfile *p = R_NEW (RRunProfile);
+	RRunProfile *p = R_NEW0 (RRunProfile);
 	if (p) {
 		r_run_reset (p);
-		if (str) r_run_parsefile (p, str);
+		r_run_parsefile (p, str);
 	}
 	return p;
 }
@@ -71,15 +74,21 @@ R_API void r_run_reset(RRunProfile *p) {
 	p->_aslr = -1;
 }
 
-R_API int r_run_parse(RRunProfile *pf, const char *profile) {
+R_API bool r_run_parse(RRunProfile *pf, const char *profile) {
+	if (!pf || !profile) {
+		return false;
+	}
 	char *p, *o, *str = strdup (profile);
-	if (!str) return 0;
+	if (!str) {
+		return false;
+	}
+	r_str_replace_char (str, '\r',0);
 	for (o = p = str; (o = strchr (p, '\n')); p = o) {
 		*o++ = 0;
 		r_run_parseline (pf, p);
 	}
 	free (str);
-	return 1;
+	return true;
 }
 
 R_API void r_run_free (RRunProfile *r) {
@@ -117,12 +126,13 @@ static char *getstr(const char *src) {
 		ret = strdup (src+1);
 		if (ret) {
 			len = strlen (ret);
-			if (len>0) {
+			if (len > 0) {
 				len--;
-				if (ret[len]=='\'') {
+				if (ret[len] == '\'') {
 					ret[len] = 0;
 					return ret;
-				} else eprintf ("Missing \"\n");
+				}
+				eprintf ("Missing \"\n");
 			}
 			free (ret);
 		}
@@ -261,9 +271,7 @@ static int handle_redirection_proc (const char *cmd, bool in, bool out, bool err
 	// case of interactive programs.
 	int saved_stdin = dup (STDIN_FILENO);
 	int saved_stdout = dup (STDOUT_FILENO);
-
-	int fdm;
-	int pid = forkpty (&fdm, NULL, NULL, NULL);
+	int fdm, pid = forkpty (&fdm, NULL, NULL, NULL);
 	if (in) {
 		dup2 (fdm, STDIN_FILENO);
 	}
@@ -292,20 +300,32 @@ static int handle_redirection_proc (const char *cmd, bool in, bool out, bool err
 	close (saved_stdout);
 	return 0;
 #else
+#ifdef _MSC_VER
+#pragma message ("TODO: handle_redirection_proc: Not implemented for this platform")
+#else
 #warning handle_redirection_proc : unimplemented for this platform
+#endif
 	return -1;
 #endif
 }
 
 static int handle_redirection(const char *cmd, bool in, bool out, bool err) {
-	if (!cmd || cmd[0] == '\0') return 0;
+	if (!cmd || cmd[0] == '\0') {
+		return 0;
+	}
+
+#if __APPLE__ && !__POWERPC__
+	//XXX handle this in other layer since things changes a little bit
+	//this seems like a really good place to refactor stuff
+	return 0;
+#endif 
 
 	if (cmd[0] == '"') {
 #if __UNIX__
 		if (in) {
 			int pipes[2];
 			if (pipe (pipes) != -1) {
-				write (pipes[1], cmd+1, strlen (cmd)-2);
+				write (pipes[1], cmd + 1, strlen (cmd)-2);
 				write (pipes[1], "\n", 1);
 				close (0);
 				dup2 (pipes[0], 0);
@@ -314,7 +334,11 @@ static int handle_redirection(const char *cmd, bool in, bool out, bool err) {
 			}
 		}
 #else
+#ifdef _MSC_VER
+#pragma message ("string redirection handle not yet done")
+#else
 #warning quoted string redirection handle not yet done
+#endif
 #endif
 		return 0;
 	} else if (cmd[0] == '!') {
@@ -337,9 +361,15 @@ static int handle_redirection(const char *cmd, bool in, bool out, bool err) {
 			return 1;
 		}
 #define DUP(x) { close(x); dup2(f,x); }
-		if (in) DUP(0);
-		if (out) DUP(1);
-		if (err) DUP(2);
+		if (in) {
+			DUP(0);
+		}
+		if (out) {
+			DUP(1);
+		}
+		if (err) {
+			DUP(2);
+		}
 		close (f);
 		return 0;
 	}
@@ -355,17 +385,20 @@ R_API int r_run_parsefile (RRunProfile *p, const char *b) {
 	return 0;
 }
 
-R_API int r_run_parseline (RRunProfile *p, char *b) {
+R_API bool r_run_parseline (RRunProfile *p, char *b) {
 	int must_free = false;
 	char *e = strchr (b, '=');
-	if (!e) return 0;
-	if (*b=='#') return 0;
+	if (!e || *b == '#') {
+		return 0;
+	}
 	*e++ = 0;
 	if (*e=='$') {
 		must_free = true;
 		e = r_sys_getenv (e);
 	}
-	if (!e) return 0;
+	if (!e) {
+		return 0;
+	}
 	if (!strcmp (b, "program")) p->_args[0] = p->_program = strdup (e);
 	else if (!strcmp (b, "system")) p->_system = strdup (e);
 	else if (!strcmp (b, "aslr")) p->_aslr = parseBool (e);
@@ -405,27 +438,30 @@ R_API int r_run_parseline (RRunProfile *p, char *b) {
 	else if (!strcmp (b, "setgid")) p->_setgid = strdup (e);
 	else if (!strcmp (b, "setegid")) p->_setegid = strdup (e);
 	else if (!strcmp (b, "nice")) p->_nice = atoi (e);
+	else if (!strcmp (b, "timeout")) p->_timeout = atoi (e);
+	else if (!strcmp (b, "timeoutsig")) p->_timeout_sig = r_signal_from_string (e);
 	else if (!memcmp (b, "arg", 3)) {
 		int n = atoi (b + 3);
 		if (n >= 0 && n < R_RUN_PROFILE_NARGS) {
 			p->_args[n] = getstr (e);
-		} else eprintf ("Out of bounds args index: %d\n", n);
-	} else if (!strcmp (b, "timeout")) {
-		p->_timeout = atoi (e);
-	} else if (!strcmp (b, "timeoutsig")) {
-		// TODO: support non-numeric signal numbers here
-		p->_timeout_sig = atoi (e);
+		} else {
+			eprintf ("Out of bounds args index: %d\n", n);
+		}
 	} else if (!strcmp (b, "envfile")) {
 		char *p, buf[1024];
 		FILE *fd = fopen (e, "r");
 		if (!fd) {
 			eprintf ("Cannot open '%s'\n", e);
-			if (must_free == true) free (e);
-			return 0;
+			if (must_free == true) {
+				free (e);
+			}
+			return false;
 		}
 		for (;;) {
-			fgets (buf, sizeof (buf)-1, fd);
-			if (feof (fd)) break;
+			fgets (buf, sizeof (buf) - 1, fd);
+			if (feof (fd)) {
+				break;
+			}
 			p = strchr (buf, '=');
 			if (p) {
 				*p = 0;
@@ -446,9 +482,10 @@ R_API int r_run_parseline (RRunProfile *p, char *b) {
 	} else if (!strcmp(b, "clearenv")) {
 		r_sys_clearenv ();
 	}
-	if (must_free == true)
+	if (must_free == true) {
 		free (e);
-	return 1;
+	}
+	return true;
 }
 
 R_API const char *r_run_help() {
@@ -468,6 +505,7 @@ R_API const char *r_run_help() {
 	"# clearenv=true\n"
 	"# envfile=environ.txt\n"
 	"timeout=3\n"
+	"# timeoutsig=SIGTERM # or 15\n"
 	"# connect=localhost:8080\n"
 	"# listen=8080\n"
 	"# pty=false\n"
@@ -634,7 +672,7 @@ R_API int r_run_config_env(RRunProfile *p) {
 	if (handle_redirection (p->_stderr, false, false, true) != 0) {
 		return 1;
 	}
-	if (p->_aslr != -1)
+	if (p->_aslr != -1) 
 		setASLR (p->_aslr);
 #if __UNIX__
 	set_limit (p->_docore, RLIMIT_CORE, RLIM_INFINITY);
@@ -688,7 +726,11 @@ R_API int r_run_config_env(RRunProfile *p) {
 				is_child = true;
 
 				if (p->_dofork && !p->_dodebug) {
+#ifdef _MSC_VER
+					int child_pid = r_sys_fork ();
+#else
 					pid_t child_pid = r_sys_fork ();
+#endif
 					if (child_pid == -1) {
 						eprintf("rarun2: cannot fork\n");
 						r_socket_free (child);
@@ -735,6 +777,7 @@ R_API int r_run_config_env(RRunProfile *p) {
 				eprintf ("Cannot chroot to %s\n", p->_chroot);
 				return 1;
 			} else {
+				(void) chdir ("/");
 				if (p->_chgdir) {
 					if (chdir (p->_chgdir) == -1) {
 						eprintf ("Cannot chdir after chroot to %s\n", p->_chgdir);

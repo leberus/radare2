@@ -4,7 +4,8 @@ include ../../mk/$(COMPILER).mk
 include ../../shlr/zip/deps.mk
 EDITOR?=vim
 CC?=gcc
-AR?=ar
+CC_AR?=ar
+AR?=$(CC_AR)
 RANLIB?=ranlib
 LIBNAME=libgdbr
 LIBFILE=$(LIBNAME).$(EXT_SO)
@@ -12,10 +13,16 @@ CFLAGS+=-I$(LIBR)/include $(PIC_CFLAGS)
 CFLAGS+=-Iinclude -I${LIBR}/include
 MAJOR=0
 MINOR=1
-#CFLAGS=-Wall -g -O0 -ggdb # -std=gnu11
 LD=$(CC)
+ifeq ($(LD),cccl)
+LDFLAGS+=-L${LIBR}/socket -llibr_socket
+LDFLAGS+=-L${LIBR}/util -llibr_util
+EXT_AR?=lib
+else
 LDFLAGS+=-L${LIBR}/socket -lr_socket
 LDFLAGS+=-L${LIBR}/util -lr_util
+EXT_AR?=a
+endif
 
 ifeq (${OSTYPE},darwin)
 LDFLAGS_SHARED=-dynamiclib
@@ -39,13 +46,13 @@ LIB=lib
 TEST_INCLUDES += $(INCLUDES) -I/usr/include/glib-2.0 -I/usr/lib64/glib-2.0/include
 
 SRC_D=src
-SRC_C=$(wildcard $(SRC_D)/*.c)
+SRC_C=$(wildcard $(SRC_D)/*.c) $(wildcard $(SRC_D)/*/*.c)
 SRC_O=$(SRC_C:.c=.o)
 
 TEST_C=$(wildcard $(TEST_D)/*.c)
 TEST_O=$(TEST_C:.c=.o)
 
-all: $(LIB)/$(LIBNAME).a
+all: $(LIB)/$(LIBNAME).${EXT_AR}
 #	make
 
 default: make
@@ -56,17 +63,17 @@ prepare:
 $(LIB):
 	mkdir -p $(LIB)
 
-$(LIB)/$(LIBNAME).a: $(LIB) $(SRC_O)
+$(LIB)/$(LIBNAME).${EXT_AR}: $(LIB) $(SRC_O)
 	$(LD) $(PIC_CFLAGS) $(LDFLAGS_SHARED) -o $(LIB)/$(LIBFILE) $(CFLAGS) $(SRC_O) $(LDFLAGS) $(LINK)
-	$(AR) rvs $(LIB)/$(LIBNAME).a $(SRC_O)
+	$(AR) rvs $(LIB)/$(LIBNAME).${EXT_AR} $(SRC_O)
 	# required for solaris and w32
-	$(RANLIB) $(LIB)/$(LIBNAME).a
+	$(RANLIB) $(LIB)/$(LIBNAME).${EXT_AR}
 
 clean:
 	-rm -f $(SRC_O)
 	-rm -rf lib
 
-unit: lib 
+unit: lib
 	$(CC) $(CFLAGS) $(TEST_INCLUDES) -c $(UNIT_TEST) -o $(TEST_D)/unit.o
 	$(LD) $(TEST_D)/unit.o -o $(TEST_D)/unit -L$(LIB) -lgdbr -lglib-2.0
 

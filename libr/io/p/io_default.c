@@ -184,7 +184,7 @@ static int r_io_def_mmap_read(RIO *io, RIODesc *fd, ut8 *buf, int count) {
 	if (mmo->rawio) {
 		if (fd->obsz) {
 			char *a_buf;
-			ssize_t a_count;
+			int a_count;
 			// only do aligned reads in aligned offsets
 			const int aligned = fd->obsz; //512; // XXX obey fd->obsz? or it may be too slow? 128K..
 			//ut64 a_off = (io->off >> 9 ) << 9; //- (io->off & aligned);
@@ -234,7 +234,7 @@ static int r_io_def_mmap_write(RIO *io, RIODesc *fd, const ut8 *buf, int count) 
 	if (mmo->rawio) {
 		if (fd->obsz) {
 			char *a_buf;
-			ssize_t a_count;
+			int a_count;
 			// only do aligned reads in aligned offsets
 			const int aligned = fd->obsz; //512; // XXX obey fd->obsz? or it may be too slow? 128K..
 			//ut64 a_off = (io->off >> 9 ) << 9; //- (io->off & aligned);

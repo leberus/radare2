@@ -4,6 +4,10 @@
 #include "r_util.h"
 #include <stdio.h>
 
+#ifdef _MSC_VER
+#pragma comment(lib, "advapi32.lib")
+#endif
+
 R_LIB_VERSION (r_io);
 
 /* allocate 128 MB */
@@ -281,7 +285,7 @@ R_API int r_io_reopen(RIO *io, RIODesc *desc, int flags, int mode) {
 }
 
 R_API int r_io_use_desc(RIO *io, RIODesc *d) {
-	if (d && d->plugin) {
+	if (io && d && d->plugin) {
 		io->desc = d;
 		io->plugin = d->plugin;
 		return true;
@@ -351,33 +355,27 @@ R_API int r_io_read(RIO *io, ut8 *buf, int len) {
 	return ret;
 }
 
-int r_io_read_cr (RIO *io, ut64 addr, ut8 *buf, int len) {
-	RList *maps;
-	RListIter *iter;
-	RIOMap *map;
-	if (!io)
-		return R_FAIL;
-	if (io->ff)
-		memset (buf, io->Oxff, len);
-	if (io->raw) {
-		r_io_seek (io, addr, R_IO_SEEK_SET);
-		return r_io_read_internal (io, buf, len);
+R_API int r_io_pread (RIO *io, ut64 paddr, ut8 *buf, int len) {
+	if (!io || !buf || len < 0) {
+		return -1;
 	}
-	if (io->va) {
-		r_io_vread (io, addr, buf, len); //must check return-stat
-		if (io->cached)
-			r_io_cache_read (io, addr, buf, len);
-		return len;
+	if (paddr == UT64_MAX) {
+		if (io->ff) {
+			memset (buf, 0xff, len);
+			return len;
+		}
+		return -1;
 	}
-	maps = r_io_map_get_maps_in_range (io, addr, addr + len);
-	r_list_foreach (maps, iter, map) {
-		r_io_mread (io, map->fd, addr, buf, len); //must check return-stat
+	if (io->buffer_enabled) {
+		return r_io_buffer_read (io, paddr, buf, len);
 	}
-	r_io_mread (io, io->desc->fd, addr, buf, len); //must check return-stat
-	if (io->cached)
-		r_io_cache_read (io, addr, buf, len);
-	r_list_free (maps);
-	return len;
+	if (!io->desc || !io->desc->plugin || !io->desc->plugin->read) {
+		return -1;
+	}
+	if (r_io_seek (io, paddr, R_IO_SEEK_SET) == UT64_MAX) {
+		return -1;
+	}
+	return io->desc->plugin->read (io, io->desc, buf, len);
 }
 
 R_API int r_io_read_at(RIO *io, ut64 addr, ut8 *buf, int len) {
@@ -386,9 +384,6 @@ R_API int r_io_read_at(RIO *io, ut64 addr, ut8 *buf, int len) {
 
 	if (!io || !buf || len < 0) {
 		return 0;
-	}
-	if (io->vio) {
-		return r_io_read_cr (io, addr, buf, len);
 	}
 	if (io->sectonly && !r_list_empty (io->sections)) {
 		if (!r_io_section_exists_for_vaddr (io, addr, 0)) {
@@ -407,13 +402,6 @@ R_API int r_io_read_at(RIO *io, ut64 addr, ut8 *buf, int len) {
 				return 0;
 			}
 		}
-	}
-
-	if (io->raw) {
-		if (r_io_seek (io, addr, R_IO_SEEK_SET) == UT64_MAX) {
-			memset (buf, io->Oxff, len);
-		}
-		return r_io_read_internal (io, buf, len);
 	}
 
 	io->off = addr;
@@ -449,7 +437,7 @@ R_API int r_io_read_at(RIO *io, ut64 addr, ut8 *buf, int len) {
 				// is there a map somewhere within the next range for
 				// us to read from
 				next_sec = r_io_section_get_first_in_vaddr_range (io, addr + w, addr + len + w);
-				next_sec_addr = next_sec? next_sec->offset: UT64_MAX;
+				next_sec_addr = next_sec? next_sec->paddr: UT64_MAX;
 
 				if (!next_sec) {
 					next_map = r_io_map_get_first_map_in_range (io, addr + w, addr + len + w);
@@ -494,7 +482,6 @@ R_API int r_io_read_at(RIO *io, ut64 addr, ut8 *buf, int len) {
 		} else {
 			paddr = 0;
 		}
-		//if (!paddr || paddr==UT64_MAX)
 		if (paddr == UT64_MAX) {
 			paddr = r_io_map_select (io, addr); // XXX
 		}
@@ -544,8 +531,9 @@ R_API int r_io_read_at(RIO *io, ut64 addr, ut8 *buf, int len) {
 				ut64 o = r_io_section_maddr_to_vaddr (io, addr + w);
 				if (o == UT64_MAX) {
 					ut64 o = r_io_section_vaddr_to_maddr_try (io, addr + w);
-					if (o == UT64_MAX)
+					if (o == UT64_MAX) {
 						memset (buf + w, io->Oxff, l);
+					}
 				}
 				break;
 			}
@@ -631,11 +619,14 @@ R_API int r_io_extend(RIO *io, ut64 size) {
 	}
 
 	buffer = malloc (tmp_size);
+	if (!buffer) {
+		return false;
+	}
 	// shift the bytes over by size
-	r_io_seek (io, curr_off, R_IO_SEEK_SET);
+	(void) r_io_seek (io, curr_off, R_IO_SEEK_SET);
 	r_io_read (io, buffer, tmp_size);
 	// move/write the bytes
-	r_io_seek (io, curr_off + size, R_IO_SEEK_SET);
+	(void) r_io_seek (io, curr_off + size, R_IO_SEEK_SET);
 	r_io_write (io, buffer, tmp_size);
 	// zero out new bytes
 	if (cur_size < size) {
@@ -643,17 +634,17 @@ R_API int r_io_extend(RIO *io, ut64 size) {
 		buffer = malloc (size);
 	}
 	memset (buffer, 0, size);
-	r_io_seek (io, curr_off, R_IO_SEEK_SET);
+	(void) r_io_seek (io, curr_off, R_IO_SEEK_SET);
 	r_io_write (io, buffer, size);
 	// reset the cursor
-	r_io_seek (io, curr_off, R_IO_SEEK_SET);
+	(void) r_io_seek (io, curr_off, R_IO_SEEK_SET);
 	free (buffer);
 	return true;
 }
 
 R_API int r_io_extend_at(RIO *io, ut64 addr, ut64 size) {
 	if (!size) return false;
-	r_io_seek (io, addr, R_IO_SEEK_SET);
+	(void) r_io_seek (io, addr, R_IO_SEEK_SET);
 	return r_io_extend (io, size);
 }
 
@@ -781,11 +772,26 @@ cleanup:
 	return ret;
 }
 
+R_API int r_io_pwrite (RIO *io, ut64 paddr, const ut8 *buf, int len) {
+	if (!io || !buf || paddr == UT64_MAX || len < 0) {
+		return -1;
+	}
+	if (!io->desc || !io->desc->plugin || !io->desc->plugin->write) {
+		return -1;
+	}
+	if (r_io_seek (io, paddr, R_IO_SEEK_SET) == UT64_MAX) {
+		return -1;
+	}
+	return io->desc->plugin->write (io, io->desc, buf, len);
+}
+
 R_API int r_io_write_at(RIO *io, ut64 addr, const ut8 *buf, int len) {
 	if (io->cached) {
 		return r_io_cache_write (io, addr, buf, len);
 	}
-	(void)r_io_seek (io, addr, R_IO_SEEK_SET);
+	if (r_io_seek (io, addr, R_IO_SEEK_SET) == UT64_MAX) {
+		return false;
+	}
 	// errors on seek are checked and ignored here //
 	return r_io_write (io, buf, len);
 }
@@ -818,7 +824,7 @@ R_API ut64 r_io_seek(RIO *io, ut64 offset, int whence) {
 	// XXX: list_empty trick must be done in r_io_set_va();
 	//eprintf ("-(seek)-> 0x%08llx\n", offset);
 	//if (!io->debug && io->va && !r_list_empty (io->sections)) {
-	if (!io->debug || !io->raw) { //
+	if (!io->debug) {
 		if (io->va && !r_list_empty (io->sections)) {
 			ut64 o = r_io_section_vaddr_to_maddr_try (io, offset);
 			if (o != UT64_MAX) {
@@ -828,13 +834,15 @@ R_API ut64 r_io_seek(RIO *io, ut64 offset, int whence) {
 		}
 	}
 	// if resolution fails... just return as invalid address
-	if (offset == UT64_MAX || !io->desc) {
+	if (offset == UT64_MAX) {
 		return UT64_MAX;
 	}
-	if (io->plugin && io->plugin->lseek) {
-		ret = io->plugin->lseek (io, io->desc, offset, whence);
-	} else {
-		ret = (ut64)lseek (io->desc->fd, offset, posix_whence);
+	if (io->desc) {
+		if (io->plugin && io->plugin->name && io->plugin->lseek) {
+			ret = io->plugin->lseek (io, io->desc, offset, whence);
+		} else {
+			ret = (ut64)lseek (io->desc->fd, offset, posix_whence);
+		}
 	}
 	if (whence == R_IO_SEEK_SET) {
 		io->off = offset;
@@ -859,7 +867,7 @@ R_API ut64 r_io_fd_size(RIO *io, int fd) {
 	return r_io_desc_size (io, desc);
 }
 
-R_API int r_io_is_blockdevice(RIO *io) {
+R_API bool r_io_is_blockdevice(RIO *io) {
 #if __UNIX__
 	if (io && io->desc && io->desc->fd) {
 		struct stat buf;
@@ -874,13 +882,13 @@ R_API int r_io_is_blockdevice(RIO *io) {
 			//	eprintf ("OPtimal blocksize: %d\n", buf.st_blksize);
 			if ((buf.st_mode & S_IFCHR) == S_IFCHR) {
 				io->desc->obsz = buf.st_blksize;
-				return 1;
+				return true;
 			}
 			return ((buf.st_mode & S_IFBLK) == S_IFBLK);
 		}
 	}
 #endif
-	return 0;
+	return false;
 }
 
 R_API ut64 r_io_size(RIO *io) {
@@ -954,7 +962,9 @@ R_API int r_io_close(RIO *io, RIODesc *d) {
 
 R_API int r_io_close_all(RIO *io) {
 	// LOT OF MEMLEAKS HERE
-	if (!io) return 0;
+	if (!io) {
+		return 0;
+	}
 	r_cache_free (io->buffer);
 	io->buffer = r_cache_new (); // RCache is a list of ranged buffers. maybe rename?
 	io->write_mask_fd = -1;
@@ -1079,7 +1089,11 @@ static ut8 *r_io_desc_read(RIO *io, RIODesc *desc, ut64 *out_sz) {
 				"Allocating R_IO_MAX_ALLOC set as the environment variable.\n", io->maxalloc);
 		*out_sz = io->maxalloc;
 	}
-	buf = malloc (*out_sz);
+	buf = malloc (*out_sz + 1);
+	if (!buf) {
+		return NULL;
+	}
+	buf[*out_sz] = 0;
 	if (!buf) {
 		if (*out_sz > R_IO_MAX_ALLOC) {
 			char *num_unit = r_num_units (NULL, *out_sz);
@@ -1088,7 +1102,8 @@ static ut8 *r_io_desc_read(RIO *io, RIODesc *desc, ut64 *out_sz) {
 				num_unit, (ut64)R_IO_MAX_ALLOC);
 			free (num_unit);
 			*out_sz = R_IO_MAX_ALLOC;
-			buf = malloc (*out_sz);
+			buf = malloc (*out_sz + 1);
+			buf[*out_sz] = 0;
 		}
 		if (!buf) {
 			char *num_unit = r_num_units (NULL, *out_sz);
@@ -1110,10 +1125,6 @@ static ut8 *r_io_desc_read(RIO *io, RIODesc *desc, ut64 *out_sz) {
 
 static RIO *r_io_bind_get_io(RIOBind *bnd) {
 	return bnd? bnd->io: NULL;
-}
-
-R_API void r_io_set_raw(RIO *io, int raw) {
-	io->raw = raw? 1: 0;
 }
 
 // check if reading at offset or writting to offset is reasonable
@@ -1158,24 +1169,16 @@ if (hasperm) {
 	if (io->debug) {
 		// TODO check debug maps here
 		return true;
-	} else {
-		if (io_sectonly) {
-			if (r_list_empty (io->sections)) {
-				return true;
-			}
-			return (r_io_map_exists_for_offset (io, offset) ||
-				r_io_section_exists_for_vaddr (io, offset, hasperm));
-		} else {
-			if (!io_va) {
-				if (!io_va && r_io_map_exists_for_offset (io, offset)) {
-					return true;
-				}
-			}
-			return r_io_section_exists_for_vaddr (io, offset, hasperm);
-			//return (offset < r_io_size (io));
-		}
 	}
-	eprintf ("r_io_is_valid_offset: io->va is %i\n", io->va);
-	r_sys_backtrace ();
-	return R_FAIL;
+	if (io_sectonly) {
+		if (r_list_empty (io->sections)) {
+			return true;
+		}
+		return (r_io_map_exists_for_offset (io, offset) ||
+			r_io_section_exists_for_vaddr (io, offset, hasperm));
+	}
+	if (!io_va && r_io_map_exists_for_offset (io, offset)) {
+		return true;
+	}
+	return r_io_section_exists_for_vaddr (io, offset, hasperm);
 }

@@ -4,7 +4,7 @@ EXTRA_TARGETS+=do
 EXTRA_CLEAN=doclean
 
 NAME=r_anal
-DEPS=r_util r_reg r_syscall
+DEPS=r_util r_reg r_syscall r_search r_cons
 CFLAGS+=-DCORELIB -Iarch -I$(TOP)/shlr
 CFLAGS+=-I$(LTOP)/asm/arch/include
 
@@ -14,7 +14,8 @@ CURDIR=p/
 
 include p/capstone.mk
 LDFLAGS+=$(CS_LDFLAGS)
-LDFLAGS+=$(SHLR)/java/libr_java.a
+include $(STOP)/java/deps.mk
+LDFLAGS+=$(LINK)
 
 .PHONY: all plugins libs ${EXTRA_CLEAN}
 

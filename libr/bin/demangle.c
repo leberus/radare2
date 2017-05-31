@@ -123,7 +123,7 @@ R_API char *r_bin_demangle_cxx(RBinFile *binfile, const char *str, ut64 vaddr) {
 	// | DMGL_RET_POSTFIX | DMGL_TYPES;
 	int i;
 #if WITH_GPL
-	int flags = DMGL_NO_OPTS;
+	int flags = DMGL_NO_OPTS | DMGL_PARAMS;
 #endif
 	const char *prefixes[] = {
 		"__symbol_stub1_",
@@ -330,7 +330,7 @@ R_API char *r_bin_demangle_rust(RBinFile *binfile, const char *sym, ut64 vaddr) 
 		len--;
 	}
 
-	while (len-- > 0) {
+	while ((len = strlen (in)) > 0) {
 		if (!(*in == '$' && (RS("$SP$", '@')
 				|| RS("$BP$", '*')
 				|| RS("$RF$", '&')

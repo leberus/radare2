@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2012-2016 - pancake */
+/* radare - LGPL - Copyright 2012-2017 - pancake */
 
 #include <r_anal.h>
 
@@ -72,21 +72,24 @@ static ut64 is_pointer(RAnal *anal, const ut8 *buf, int size) {
 #endif
 }
 
-static int is_bin(const ut8 *buf, int size) {
-	// TODO: add more
-	if ((size >= 4 && !memcmp (buf, "\xcf\xfa\xed\xfe", 4)))
+static bool is_bin(const ut8 *buf, int size) {
+	// TODO: add more magic signatures heres
+	if ((size >= 4 && !memcmp (buf, "\xcf\xfa\xed\xfe", 4))) {
 		return true;
-	if ((size >= 4 && !memcmp (buf, "\x7e" "ELF", 4)))
+	}
+	if ((size >= 4 && !memcmp (buf, "\x7f\x45\x4c\x46", 4))) { // \x7fELF
 		return true;
-	if ((size >= 2 && !memcmp (buf, "MZ", 2)))
+	}
+	if ((size >= 2 && !memcmp (buf, "MZ", 2))) {
 		return true;
+	}
 	return false;
 }
 
 // TODO: add is_flag, is comment?
 
 // XXX: optimize by removing all strlens here
-R_API char *r_anal_data_to_string(RAnalData *d) {
+R_API char *r_anal_data_to_string(RAnalData *d, RConsPalette *pal) {
 	int i, len, idx, mallocsz = 1024;
 	ut32 n32;
 	char *line;
@@ -98,7 +101,12 @@ R_API char *r_anal_data_to_string(RAnalData *d) {
 		eprintf ("Cannot allocate %d bytes\n", mallocsz);
 		return NULL;
 	}
-	snprintf (line, mallocsz, "0x%08" PFMT64x "  ", d->addr);
+	if (pal) {
+		const char *k = pal->offset;
+		snprintf (line, mallocsz, "%s0x%08" PFMT64x Color_RESET"  ", k, d->addr);
+	} else {
+		snprintf (line, mallocsz, "0x%08" PFMT64x "  ", d->addr);
+	}
 	n32 = (ut32)d->ptr;
 	len = R_MIN (d->len, 8);
 	for (i = 0, idx = strlen (line); i < len; i++) {
@@ -118,27 +126,52 @@ R_API char *r_anal_data_to_string(RAnalData *d) {
 	if (mallocsz - idx > 12) {
 		switch (d->type) {
 		case R_ANAL_DATA_TYPE_STRING:
-			snprintf (line + idx, mallocsz - idx, "string \"%s\"", d->str);
+			if (pal) {
+				snprintf (line + idx, mallocsz - idx, "%sstring \"%s\""Color_RESET, pal->comment, d->str);
+			} else {
+				snprintf (line + idx, mallocsz - idx, "string \"%s\"", d->str);
+			}
 			break;
 		case R_ANAL_DATA_TYPE_WIDE_STRING:
 			strcat (line, "wide string");
 			break;
 		case R_ANAL_DATA_TYPE_NUMBER:
-			if (n32 == d->ptr) {
-				snprintf (line + idx, mallocsz - idx,
-					"number %d 0x%x", n32, n32);
+			if (pal) {
+				const char *k = pal->num;
+				if (n32 == d->ptr) {
+					snprintf (line + idx, mallocsz - idx,
+							"%snumber %d (0x%x)"Color_RESET, k, n32, n32);
+				} else {
+					snprintf (line + idx, mallocsz - idx,
+							"%snumber %" PFMT64d " (0x%" PFMT64x ")"Color_RESET,
+							k, d->ptr, d->ptr);
+				}
 			} else {
-				snprintf (line + idx, mallocsz - idx,
-					"number %" PFMT64d " 0x%" PFMT64x,
-					d->ptr, d->ptr);
+				if (n32 == d->ptr) {
+					snprintf (line + idx, mallocsz - idx,
+							"number %d 0x%x", n32, n32);
+				} else {
+					snprintf (line + idx, mallocsz - idx,
+							"number %" PFMT64d " 0x%" PFMT64x,
+							d->ptr, d->ptr);
+				}
 			}
 			break;
 		case R_ANAL_DATA_TYPE_POINTER:
 			strcat (line, "pointer ");
-			sprintf (line + strlen (line), " 0x%08" PFMT64x, d->ptr);
+			if (pal) {
+				const char *k = pal->offset;
+				sprintf (line + strlen (line), " %s0x%08" PFMT64x, k, d->ptr);
+			} else {
+				sprintf (line + strlen (line), " 0x%08" PFMT64x, d->ptr);
+			}
 			break;
 		case R_ANAL_DATA_TYPE_INVALID:
-			strcat (line, "invalid");
+			if (pal) {
+				snprintf (line + idx, mallocsz - idx, "%sinvalid"Color_RESET, pal->invalid);
+			} else {
+				strcat (line, "invalid");
+			}
 			break;
 		case R_ANAL_DATA_TYPE_HEADER:
 			strcat (line, "header");
@@ -150,10 +183,18 @@ R_API char *r_anal_data_to_string(RAnalData *d) {
 			strcat (line, "pattern");
 			break;
 		case R_ANAL_DATA_TYPE_UNKNOWN:
-			strcat (line, "unknown");
+			if (pal) {
+				snprintf (line + idx, mallocsz - idx, "%sunknown"Color_RESET, pal->invalid);
+			} else {
+				strcat (line, "unknown");
+			}
 			break;
 		default:
-			strcat (line, "(null)");
+			if (pal) {
+				snprintf (line + idx, mallocsz - idx, "%s(null)"Color_RESET, pal->b0x00);
+			} else {
+				strcat (line, "(null)");
+			}
 			break;
 		}
 	}
@@ -225,24 +266,26 @@ R_API RAnalData *r_anal_data_new(ut64 addr, int type, ut64 n, const ut8 *buf, in
 
 R_API void r_anal_data_free(RAnalData *d) {
 	if (d) {
-		if (d->buf != (ut8 *)&(d->sbuf)) free (d->buf);
+		if (d->buf != (ut8 *)&(d->sbuf)) {
+			free (d->buf);
+		}
 		free (d->str);
 		free (d);
 	}
 }
 
-R_API RAnalData *r_anal_data(RAnal *anal, ut64 addr, const ut8 *buf, int size) {
+R_API RAnalData *r_anal_data(RAnal *anal, ut64 addr, const ut8 *buf, int size, int wordsize) {
 	ut64 dst = 0;
 	int n, nsize = 0;
 	int bits = anal->bits;
-	int word = R_MIN (8, bits / 8);
+	int word = wordsize? wordsize: R_MIN (8, bits / 8);
 
 	if (size < 4) {
 		return NULL;
 	}
-	if (size >= word && is_invalid (buf, word))
-		return r_anal_data_new (addr, R_ANAL_DATA_TYPE_INVALID,
-					-1, buf, word);
+	if (size >= word && is_invalid (buf, word)) {
+		return r_anal_data_new (addr, R_ANAL_DATA_TYPE_INVALID, -1, buf, word);
+	}
 	{
 		int i, len = R_MIN (size, 64);
 		int is_pattern = 0;
@@ -253,7 +296,9 @@ R_API RAnalData *r_anal_data(RAnal *anal, ut64 addr, const ut8 *buf, int size) {
 			if (ch2 == buf[i]) {
 				ch2++;
 				is_sequence++;
-			} else is_sequence = 0;
+			} else {
+				is_sequence = 0;
+			}
 			if (ch == buf[i]) {
 				is_pattern++;
 			}
@@ -267,30 +312,27 @@ R_API RAnalData *r_anal_data(RAnal *anal, ut64 addr, const ut8 *buf, int size) {
 						buf, is_pattern);
 		}
 	}
-	if (size >= word && is_null (buf, word))
-		return r_anal_data_new (addr, R_ANAL_DATA_TYPE_NULL,
-					-1, buf, word);
-	if (is_bin (buf, size))
-		return r_anal_data_new (addr, R_ANAL_DATA_TYPE_HEADER, -1,
-					buf, word);
+	if (size >= word && is_null (buf, word)) {
+		return r_anal_data_new (addr, R_ANAL_DATA_TYPE_NULL, -1, buf, word);
+	}
+	if (is_bin (buf, size)) {
+		return r_anal_data_new (addr, R_ANAL_DATA_TYPE_HEADER, -1, buf, word);
+	}
 	if (size >= word) {
 		dst = is_pointer (anal, buf, word);
-		if (dst) return r_anal_data_new (addr,
-						R_ANAL_DATA_TYPE_POINTER, dst, buf, word);
+		if (dst) {
+			return r_anal_data_new (addr, R_ANAL_DATA_TYPE_POINTER, dst, buf, word);
+		}
 	}
 	switch (is_string (buf, size, &nsize)) {
-	case 1: return r_anal_data_new_string (addr, (const char *)buf,
-					nsize, R_ANAL_DATA_TYPE_STRING);
-	case 2: return r_anal_data_new_string (addr, (const char *)buf,
-					nsize, R_ANAL_DATA_TYPE_WIDE_STRING);
+	case 1: return r_anal_data_new_string (addr, (const char *)buf, nsize, R_ANAL_DATA_TYPE_STRING);
+	case 2: return r_anal_data_new_string (addr, (const char *)buf, nsize, R_ANAL_DATA_TYPE_WIDE_STRING);
 	}
 	if (size >= word) {
 		n = is_number (buf, word);
-		if (n) return r_anal_data_new (addr, R_ANAL_DATA_TYPE_NUMBER,
-					n, buf, word);
+		if (n) return r_anal_data_new (addr, R_ANAL_DATA_TYPE_NUMBER, n, buf, word);
 	}
-	return r_anal_data_new (addr, R_ANAL_DATA_TYPE_UNKNOWN, dst,
-				buf, R_MIN (word, size));
+	return r_anal_data_new (addr, R_ANAL_DATA_TYPE_UNKNOWN, dst, buf, R_MIN (word, size));
 }
 
 R_API const char *r_anal_data_kind(RAnal *a, ut64 addr, const ut8 *buf, int len) {
@@ -304,7 +346,7 @@ R_API const char *r_anal_data_kind(RAnal *a, ut64 addr, const ut8 *buf, int len)
 	for (i = j = 0; i < len; j++) {
 		if (str && !buf[i])
 			str++;
-		data = r_anal_data (a, addr + i, buf + i, len - i);
+		data = r_anal_data (a, addr + i, buf + i, len - i, 0);
 		if (!data) {
 			i += word;
 			continue;

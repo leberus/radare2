@@ -25,6 +25,7 @@ typedef char* (*DupValue)(void *);
 typedef size_t (*CalcSize)(void *);
 typedef ut32 (*HashFunction)(const char*);
 typedef int (*ListComparator)(const char *a, const char *b);
+typedef bool (*HtForeachCallback)(void *user, const char *k, void *v);
 
 
 /** ht **/
@@ -49,12 +50,9 @@ typedef struct ht_t {
 
 // Create a new RHashTable.
 // If hashfunction is NULL it will be used sdb_hash internally
-// If keydup or valdup are null it will be used strdup internally
+// If keydup or valdup are null it will be used an assignment
 // If keySize or valueSize are null it will be used strlen internally
-SdbHash* ht_new(HashFunction hashfunction,
-			  ListComparator comparator, DupKey keydup,
-			  DupValue valdup, HtKvFreeFunc pair_free,
-			  CalcSize keySize, CalcSize valueSize);
+SdbHash* ht_new(DupValue valdup, HtKvFreeFunc pair_free, CalcSize valueSize);
 // Destroy a hashtable and all of its entries.
 void ht_free(SdbHash* ht);
 void ht_free_deleted(SdbHash* ht);
@@ -69,4 +67,6 @@ bool ht_delete(SdbHash* ht, const char* key);
 // Find the value corresponding to the matching key.
 void* ht_find(SdbHash* ht, const char* key, bool* found);
 HtKv* ht_find_kv(SdbHash* ht, const char* key, bool* found);
+void ht_foreach(SdbHash *ht, HtForeachCallback cb, void *user);
+SdbList* ht_foreach_list(SdbHash *ht, bool sorted);
 #endif // __HT_H

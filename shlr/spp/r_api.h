@@ -17,12 +17,14 @@
   #define __BSD__ 1
   #define __UNIX__ 1
 #endif
-#if _WIN32 || __CYGWIN__ || MINGW32
+#if __WIN32__ || __CYGWIN__ || MINGW32
   #define __addr_t_defined
   #include <windows.h>
 #endif
-#if _WIN32 || MINGW32 && !__CYGWIN__
+#if __WIN32__ || MINGW32 && !__CYGWIN__
+  #ifndef _MSC_VER
   #include <winsock.h>
+  #endif
   typedef int socklen_t;
   #undef USE_SOCKETS
   #define __WINDOWS__ 1

@@ -79,7 +79,16 @@ static int __read(RIO *io, RIODesc *fd, ut8 *buf, int count) {
 		arr += 2;
 		for (num[0] = numi = bufi = 0; bufi < count && *arr; arr++) {
 			switch (*arr) {
-			case '0'...'9':
+			case '0':
+			case '1':
+			case '2':
+			case '3':
+			case '4':
+			case '5':
+			case '6':
+			case '7':
+			case '8':
+			case '9':
 				num[numi++] = *arr;
 				num[numi] = 0;
 				break;

@@ -61,7 +61,7 @@ OBJS=	zip_add.o zip_add_dir.o zip_add_entry.o \
 	zip_get_compression_implementation.o \
 	zip_get_encryption_implementation.o zip_get_file_comment.o \
 	zip_get_num_entries.o zip_get_num_files.o zip_get_name.o \
-	zip_memdup.o zip_name_locate.o zip_new.o zip_open.o \
+	zip_name_locate.o zip_new.o zip_open.o \
 	zip_rename.o zip_replace.o zip_set_archive_comment.o \
 	zip_set_archive_flag.o zip_set_default_password.o \
 	zip_set_file_comment.o zip_set_file_compression.o \
@@ -76,18 +76,18 @@ OBJS=	zip_add.o zip_add_dir.o zip_add_entry.o \
 	zip_string.o zip_unchange.o zip_unchange_all.o \
 	zip_unchange_archive.o zip_unchange_data.o zip_utf-8.o
 
-#OFILES=libr_zip.a $(OBJS)
+#OFILES=libr_zip.$(EXT_AR) $(OBJS)
 OFILES=$(OBJS)
 
-#CFLAGS+=-g -ggdb -fPIC
+#CFLAGS+=-g -fPIC
 CFLAGS+=-I../../../libr/include -I../include/
 LDFLAGS+=-L../../../libr/util
-LINKFLAGS=../zlib/libr_z.a
+LINKFLAGS=../zlib/libr_z.$(EXT_AR)
 #LDFLAGS=-shared
 EXT_SO?=dylib
 LIBNAME=libr_zip.${SOVER}
 
-LIBAR=libr_zip.a
+LIBAR=libr_zip.$(EXT_AR)
 
 all: ${LIBNAME} ${LIBAR}
 
@@ -102,4 +102,4 @@ ${LIBAR}: ${OFILES}
 	${RANLIB} ${LIBAR}
 
 clean:
-	rm -f ${LIBNAME} *.o *.a *.d *.${EXT_SO}
+	rm -f ${LIBNAME} *.o *.$(EXT_AR) *.d *.${EXT_SO}

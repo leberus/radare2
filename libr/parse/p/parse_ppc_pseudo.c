@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2015 - pancake */
+/* radare - LGPL - Copyright 2015-2017 - pancake */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,7 +14,85 @@
 #define PFMT32x "lx"
 #endif
 
-static ut64 mask64(ut64 mb, ut64 me) {
+#define SPR_MQ          0x0
+#define SPR_XER         0x1
+#define SPR_RTCU        0x4
+#define SPR_RTCL        0x5
+#define SPR_LR          0x8
+#define SPR_CTR         0x9
+#define SPR_DSISR       0x12
+#define SPR_DAR         0x13
+#define SPR_DEC         0x16
+#define SPR_SDR1        0x19
+#define SPR_SRR0        0x1a
+#define SPR_SRR1        0x1b
+#define SPR_VRSAVE      0x100
+#define SPR_TBRL        0x10c
+#define SPR_TBRU        0x10d
+#define SPR_SPRG0       0x110
+#define SPR_SPRG1       0x111
+#define SPR_SPRG2       0x112
+#define SPR_SPRG3       0x113
+#define SPR_EAR         0x11a
+#define SPR_TBL         0x11c
+#define SPR_TBU         0x11d
+#define SPR_PVR         0x11f
+#define SPR_SPEFSCR     0x200
+#define SPR_IBAT0U      0x210
+#define SPR_IBAT0L      0x211
+#define SPR_IBAT1U      0x212
+#define SPR_IBAT1L      0x213
+#define SPR_IBAT2U      0x214
+#define SPR_IBAT2L      0x215
+#define SPR_IBAT3U      0x216
+#define SPR_IBAT3L      0x217
+#define SPR_DBAT0U      0x218
+#define SPR_DBAT0L      0x219
+#define SPR_DBAT1U      0x21a
+#define SPR_DBAT1L      0x21b
+#define SPR_DBAT2U      0x21c
+#define SPR_DBAT2L      0x21d
+#define SPR_DBAT3U      0x21e
+#define SPR_DBAT3L      0x21f
+#define SPR_UMMCR0      0x3a8
+#define SPR_UMMCR1      0x3ac
+#define SPR_UPMC1       0x3a9
+#define SPR_UPMC2       0x3aa
+#define SPR_USIA        0x3ab
+#define SPR_UPMC3       0x3ad
+#define SPR_UPMC4       0x3ae
+#define SPR_MMCR0       0x3b8
+#define SPR_PMC1        0x3b9
+#define SPR_PMC2        0x3ba
+#define SPR_SIA         0x3bb
+#define SPR_MMCR1       0x3bc
+#define SPR_PMC3        0x3bd
+#define SPR_PMC4        0x3be
+#define SPR_SDA         0x3bf
+#define SPR_DMISS       0x3d0
+#define SPR_DCMP        0x3d1
+#define SPR_HASH1       0x3d2
+#define SPR_HASH2       0x3d3
+#define SPR_IMISS       0x3d4
+#define SPR_ICMP        0x3d5
+#define SPR_RPA         0x3d6
+#define SPR_HID0        0x3f0 /* Hardware Implementation Register 0 */
+#define SPR_HID1        0x3f1 /* Hardware Implementation Register 1 */
+#define SPR_IABR        0x3f2
+#define SPR_HID2        0x3f3 /* Hardware Implementation Register 2 */
+#define SPR_HID4        0x3f4 /* Hardware Implementation Register 4 */
+#define SPR_DABR        0x3f5
+#define SPR_HID5        0x3f6 /* Hardware Implementation Register 5 */
+#define SPR_HID6        0x3f9 /* Hardware Implementation Register 6 */
+//#define SPR_L2CR        0x3f9
+#define SPR_ICTC        0x3fb
+#define SPR_THRM1       0x3fc
+#define SPR_THRM2       0x3fd
+#define SPR_THRM3       0x3fe
+#define SPR_PIR         0x3ff
+
+
+ut64 mask64(ut64 mb, ut64 me) {
 	int i;
 	ut64 mask = 0;
 	if (mb > 63 || me > 63) {
@@ -119,6 +197,173 @@ static int can_replace(const char *str, int idx, int max_operands) {
 	return true;
 }
 
+static const char* getspr(const char *reg) {
+	static char cspr[16];
+	ut32 spr = 0;
+	if (!reg) return NULL;
+	spr = strtol(reg, NULL, 16);
+	if(spr > 9999) return NULL; //just to avoid overflows..
+
+	switch (spr) {
+		case SPR_MQ:
+			return "mq";
+		case SPR_XER:
+			return "xer";
+		case SPR_RTCU:
+			return "rtcu";
+		case SPR_RTCL:
+			return "rtcl";
+		case SPR_LR:
+			return "lr";
+		case SPR_CTR:
+			return "ctr";
+		case SPR_DSISR:
+			return "dsisr";
+		case SPR_DAR:
+			return "dar";
+		case SPR_DEC:
+			return "dec";
+		case SPR_SDR1:
+			return "sdr1";
+		case SPR_SRR0:
+			return "srr0";
+		case SPR_SRR1:
+			return "srr1";
+		case SPR_VRSAVE:
+			return "vrsave";
+		case SPR_TBRL:
+			return "tbrl";
+		case SPR_TBRU:
+			return "tbru";
+		case SPR_SPRG0:
+			return "sprg0";
+		case SPR_SPRG1:
+			return "sprg1";
+		case SPR_SPRG2:
+			return "sprg2";
+		case SPR_SPRG3:
+			return "sprg3";
+		case SPR_EAR:
+			return "ear";
+		case SPR_TBL:
+			return "tbl";
+		case SPR_TBU:
+			return "tbu";
+		case SPR_PVR:
+			return "pvr";
+		case SPR_SPEFSCR:
+			return "spefscr";
+		case SPR_IBAT0U:
+			return "ibat0u";
+		case SPR_IBAT0L:
+			return "ibat0l";
+		case SPR_IBAT1U:
+			return "ibat1u";
+		case SPR_IBAT1L:
+			return "ibat1l";
+		case SPR_IBAT2U:
+			return "ibat2u";
+		case SPR_IBAT2L:
+			return "ibat2l";
+		case SPR_IBAT3U:
+			return "ibat3u";
+		case SPR_IBAT3L:
+			return "ibat3l";
+		case SPR_DBAT0U:
+			return "dbat0u";
+		case SPR_DBAT0L:
+			return "dbat0l";
+		case SPR_DBAT1U:
+			return "dbat1u";
+		case SPR_DBAT1L:
+			return "dbat1l";
+		case SPR_DBAT2U:
+			return "dbat2u";
+		case SPR_DBAT2L:
+			return "dbat2l";
+		case SPR_DBAT3U:
+			return "dbat3u";
+		case SPR_DBAT3L:
+			return "dbat3l";
+		case SPR_UMMCR0:
+			return "ummcr0";
+		case SPR_UMMCR1:
+			return "ummcr1";
+		case SPR_UPMC1:
+			return "upmc1";
+		case SPR_UPMC2:
+			return "upmc2";
+		case SPR_USIA:
+			return "usia";
+		case SPR_UPMC3:
+			return "upmc3";
+		case SPR_UPMC4:
+			return "upmc4";
+		case SPR_MMCR0:
+			return "mmcr0";
+		case SPR_PMC1:
+			return "pmc1";
+		case SPR_PMC2:
+			return "pmc2";
+		case SPR_SIA:
+			return "sia";
+		case SPR_MMCR1:
+			return "mmcr1";
+		case SPR_PMC3:
+			return "pmc3";
+		case SPR_PMC4:
+			return "pmc4";
+		case SPR_SDA:
+			return "sda";
+		case SPR_DMISS:
+			return "dmiss";
+		case SPR_DCMP:
+			return "dcmp";
+		case SPR_HASH1:
+			return "hash1";
+		case SPR_HASH2:
+			return "hash2";
+		case SPR_IMISS:
+			return "imiss";
+		case SPR_ICMP:
+			return "icmp";
+		case SPR_RPA:
+			return "rpa";
+		case SPR_HID0:
+			return "hid0";
+		case SPR_HID1:
+			return "hid1";
+		case SPR_IABR:
+			return "iabr";
+		case SPR_HID2:
+			return "hid2";
+		case SPR_HID4:
+			return "hid4";
+		case SPR_DABR:
+			return "dabr";
+		case SPR_HID5:
+			return "hid5";
+		case SPR_HID6:
+			return "hid6";
+//		case SPR_L2CR:
+//			return "l2cr";
+		case SPR_ICTC:
+			return "ictc";
+		case SPR_THRM1:
+			return "thrm1";
+		case SPR_THRM2:
+			return "thrm2";
+		case SPR_THRM3:
+			return "thrm3";
+		case SPR_PIR:
+			return "pir";
+		default:
+			snprintf(cspr, sizeof(cspr), "spr_%u", spr);
+			break;
+	}
+	return cspr;
+}
+
 static int replace(int argc, const char *argv[], char *newstr) {
 	int i,j,k;
 	struct {
@@ -170,6 +415,8 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "twi", "if ((word) B A (word) C) trap", 3},
 		{ "twu", "if ((word) B A (word) C) trap", 3},
 		{ "twui", "if ((word) B A (word) C) trap", 3}, //43
+		{ "mfspr", "A = B", 2}, //44
+		{ "mtspr", "A = B", 2}, //45
 		{ "add", "A = B + C", 3},
 		{ "addc", "A = B + C", 3},
 		{ "adde", "A = B + C", 3},
@@ -241,8 +488,14 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "bflrl", "if (!cond) call A", 1},
 		{ "bl", "call A", 1},
 		{ "bla", "call A", 1},
-		{ "blr", "ret", 0},
-		{ "blrl", "ret", 0},
+		{ "blr", "return", 0},
+		{ "blrl", "return", 0},
+		{ "bltlr", "if (A & FLG_LT) return", 1},
+		{ "blelr", "if (A & FLG_LE) return", 1},
+		{ "bgtlr", "if (A & FLG_GT) return", 1},
+		{ "bgelr", "if (A & FLG_GE) return", 1},
+		{ "bnelr", "if (A & FLG_NE) return", 1},
+		{ "beqlr", "if (A & FLG_EQ) return", 1},
 		{ "brinc", "A = bit_revese(B, C)", 3},
 		{ "bt", "if (cond) goto A", 1},
 		{ "bta", "if (cond) goto A", 1},
@@ -318,13 +571,13 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "evldwx", "A = vector[C + B]", 3},
 		//Vector Load Half Word into Half Words Even and Splat  ??
 		/*
-		{ "evlhhesplat", "A = B + C", 3},
-		{ "evlhhesplatx", "A = B + C", 3},
-		{ "evlhhossplat", "A = B + C", 3},
-		{ "evlhhossplatx", "A = B + C", 3},
-		{ "evlhhousplat", "A = B + C", 3},
-		{ "evlhhousplatx", "A = B + C", 3},
-		*/
+		   { "evlhhesplat", "A = B + C", 3},
+		   { "evlhhesplatx", "A = B + C", 3},
+		   { "evlhhossplat", "A = B + C", 3},
+		   { "evlhhossplatx", "A = B + C", 3},
+		   { "evlhhousplat", "A = B + C", 3},
+		   { "evlhhousplatx", "A = B + C", 3},
+		 */
 		{ "evlwhe", "A = vector[C + B]", 3},
 		{ "evlwhex", "A = vector[C + B]", 3},
 		{ "evlwhos", "A = vector[C + B]", 3},
@@ -332,76 +585,76 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "evlwhou", "A = vector[C + B]", 3},
 		{ "evlwhoux", "A = vector[C + B]", 3},
 		/*
-		{ "evlwhsplat", "A = vector[C + B]", 3},
-		{ "evlwhsplatx", "A = vector[C + B]", 3},
-		{ "evlwwsplat", "A = vector[C + B]", 3},
-		{ "evlwwsplatx", "A = vector[C + B]", 3},
-		{ "evmergehi", "A = lo | hi", 3},
-		{ "evmergehilo", "A = B + C", 3},
-		{ "evmergelo", "A = B + C", 3},
-		{ "evmergelohi", "A = B + C", 3},
-		{ "evmhegsmfaa", "A = B + C", 3},
-		{ "evmhegsmfan", "A = B + C", 3},
-		{ "evmhegsmiaa", "A = B + C", 3},
-		{ "evmhegsmian", "A = B + C", 3},
-		{ "evmhegumiaa", "A = B + C", 3},
-		{ "evmhegumian", "A = B + C", 3},
-		{ "evmhesmf", "A = B + C", 3},
-		{ "evmhesmfa", "A = B + C", 3},
-		{ "evmhesmfaaw", "A = B + C", 3},
-		{ "evmhesmfanw", "A = B + C", 3},
-		{ "evmhesmi", "A = B + C", 3},
-		{ "evmhesmia", "A = B + C", 3},
-		{ "evmhesmiaaw", "A = B + C", 3},
-		{ "evmhesmianw", "A = B + C", 3},
-		{ "evmhessf", "A = B + C", 3},
-		{ "evmhessfa", "A = B + C", 3},
-		{ "evmhessfaaw", "A = B + C", 3},
-		{ "evmhessfanw", "A = B + C", 3},
-		{ "evmhessiaaw", "A = B + C", 3},
-		{ "evmhessianw", "A = B + C", 3},
-		{ "evmheumi", "A = B + C", 3},
-		{ "evmheumia", "A = B + C", 3},
-		{ "evmheumiaaw", "A = B + C", 3},
-		{ "evmheumianw", "A = B + C", 3},
-		{ "evmheusiaaw", "A = B + C", 3},
-		{ "evmheusianw", "A = B + C", 3},
-		{ "evmhogsmfaa", "A = B + C", 3},
-		{ "evmhogsmfan", "A = B + C", 3},
-		{ "evmhogsmiaa", "A = B + C", 3},
-		{ "evmhogsmian", "A = B + C", 3},
-		{ "evmhogumiaa", "A = B + C", 3},
-		{ "evmhogumian", "A = B + C", 3},
-		{ "evmhosmf", "A = B + C", 3},
-		{ "evmhosmfa", "A = B + C", 3},
-		{ "evmhosmfaaw", "A = B + C", 3},
-		{ "evmhosmfanw", "A = B + C", 3},
-		{ "evmhosmi", "A = B + C", 3},
-		{ "evmhosmia", "A = B + C", 3},
-		{ "evmhosmiaaw", "A = B + C", 3},
-		{ "evmhosmianw", "A = B + C", 3},
-		{ "evmhossf", "A = B + C", 3},
-		{ "evmhossfa", "A = B + C", 3},
-		{ "evmhossfaaw", "A = B + C", 3},
-		{ "evmhossfanw", "A = B + C", 3},
-		{ "evmhossiaaw", "A = B + C", 3},
-		{ "evmhossianw", "A = B + C", 3},
-		{ "evmhoumi", "A = B + C", 3},
-		{ "evmhoumia", "A = B + C", 3},
-		{ "evmhoumiaaw", "A = B + C", 3},
-		{ "evmhoumianw", "A = B + C", 3},
-		{ "evmhousiaaw", "A = B + C", 3},
-		{ "evmhousianw", "A = B + C", 3},
-		{ "evmra", "A = B + C", 3},
-		{ "evmwhsmf", "A = B + C", 3},
-		{ "evmwhsmfa", "A = B + C", 3},
-		{ "evmwhsmi", "A = B + C", 3},
-		{ "evmwhsmia", "A = B + C", 3},
-		{ "evmwhssf", "A = B + C", 3},
-		{ "evmwhssfa", "A = B + C", 3},
-		{ "evmwhumi", "A = B + C", 3},
-		{ "evmwhumia", "A = B + C", 3},
-		{ "evmwlsmiaaw", "A = B + C", 3},
+		   { "evlwhsplat", "A = vector[C + B]", 3},
+		   { "evlwhsplatx", "A = vector[C + B]", 3},
+		   { "evlwwsplat", "A = vector[C + B]", 3},
+		   { "evlwwsplatx", "A = vector[C + B]", 3},
+		   { "evmergehi", "A = lo | hi", 3},
+		   { "evmergehilo", "A = B + C", 3},
+		   { "evmergelo", "A = B + C", 3},
+		   { "evmergelohi", "A = B + C", 3},
+		   { "evmhegsmfaa", "A = B + C", 3},
+		   { "evmhegsmfan", "A = B + C", 3},
+		   { "evmhegsmiaa", "A = B + C", 3},
+		   { "evmhegsmian", "A = B + C", 3},
+		   { "evmhegumiaa", "A = B + C", 3},
+		   { "evmhegumian", "A = B + C", 3},
+		   { "evmhesmf", "A = B + C", 3},
+		   { "evmhesmfa", "A = B + C", 3},
+		   { "evmhesmfaaw", "A = B + C", 3},
+		   { "evmhesmfanw", "A = B + C", 3},
+		   { "evmhesmi", "A = B + C", 3},
+		   { "evmhesmia", "A = B + C", 3},
+		   { "evmhesmiaaw", "A = B + C", 3},
+		   { "evmhesmianw", "A = B + C", 3},
+		   { "evmhessf", "A = B + C", 3},
+		   { "evmhessfa", "A = B + C", 3},
+		   { "evmhessfaaw", "A = B + C", 3},
+		   { "evmhessfanw", "A = B + C", 3},
+		   { "evmhessiaaw", "A = B + C", 3},
+		   { "evmhessianw", "A = B + C", 3},
+		   { "evmheumi", "A = B + C", 3},
+		   { "evmheumia", "A = B + C", 3},
+		   { "evmheumiaaw", "A = B + C", 3},
+		   { "evmheumianw", "A = B + C", 3},
+		   { "evmheusiaaw", "A = B + C", 3},
+		   { "evmheusianw", "A = B + C", 3},
+		   { "evmhogsmfaa", "A = B + C", 3},
+		   { "evmhogsmfan", "A = B + C", 3},
+		   { "evmhogsmiaa", "A = B + C", 3},
+		   { "evmhogsmian", "A = B + C", 3},
+		   { "evmhogumiaa", "A = B + C", 3},
+		   { "evmhogumian", "A = B + C", 3},
+		   { "evmhosmf", "A = B + C", 3},
+		   { "evmhosmfa", "A = B + C", 3},
+		   { "evmhosmfaaw", "A = B + C", 3},
+		   { "evmhosmfanw", "A = B + C", 3},
+		   { "evmhosmi", "A = B + C", 3},
+		   { "evmhosmia", "A = B + C", 3},
+		   { "evmhosmiaaw", "A = B + C", 3},
+		   { "evmhosmianw", "A = B + C", 3},
+		   { "evmhossf", "A = B + C", 3},
+		   { "evmhossfa", "A = B + C", 3},
+		   { "evmhossfaaw", "A = B + C", 3},
+		   { "evmhossfanw", "A = B + C", 3},
+		   { "evmhossiaaw", "A = B + C", 3},
+		   { "evmhossianw", "A = B + C", 3},
+		   { "evmhoumi", "A = B + C", 3},
+		   { "evmhoumia", "A = B + C", 3},
+		   { "evmhoumiaaw", "A = B + C", 3},
+		   { "evmhoumianw", "A = B + C", 3},
+		   { "evmhousiaaw", "A = B + C", 3},
+		   { "evmhousianw", "A = B + C", 3},
+		   { "evmra", "A = B + C", 3},
+		   { "evmwhsmf", "A = B + C", 3},
+		   { "evmwhsmfa", "A = B + C", 3},
+		   { "evmwhsmi", "A = B + C", 3},
+		   { "evmwhsmia", "A = B + C", 3},
+		   { "evmwhssf", "A = B + C", 3},
+		   { "evmwhssfa", "A = B + C", 3},
+		   { "evmwhumi", "A = B + C", 3},
+		   { "evmwhumia", "A = B + C", 3},
+		   { "evmwlsmiaaw", "A = B + C", 3},
 		{ "evmwlsmianw", "A = B + C", 3},
 		{ "evmwlssiaaw", "A = B + C", 3},
 		{ "evmwlssianw", "A = B + C", 3},
@@ -516,10 +769,10 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "icbi", "inst_cache_block_inval", 0},
 		{ "icbt", "inst_cache_block_touch", 3},
 		{ "iccci", "inst_cache_inval(A,B)", 2},
-	// isel lt   Rx,Ry,Rz (equivalent to: isel Rx,Ry,Rz,0)
-	// isel gt  Rx,Ry,Rz (equivalent to: isel Rx,Ry,Rz,1)
-	// isel eq Rx,Ry,Rz (equivalent to: isel Rx,Ry,Rz,2)
-	//  { "isel", "", 4},
+		// isel lt   Rx,Ry,Rz (equivalent to: isel Rx,Ry,Rz,0)
+		// isel gt  Rx,Ry,Rz (equivalent to: isel Rx,Ry,Rz,1)
+		// isel eq Rx,Ry,Rz (equivalent to: isel Rx,Ry,Rz,2)
+		//  { "isel", "", 4},
 		{ "isync", "sync_instr_cache", 0},
 		{ "la", "A = C + B", 3},
 		{ "lbz", "A = byte[C + B]", 3},
@@ -528,10 +781,10 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "lbzux", "A = Byte[C + B]", 3},
 		{ "lbzx", "A = byte[C + B]", 3},
 		{ "ld", "A = [C + B]", 3},
-	// No clue how to reprensent them since they are kinda complex..
-	//  { "ldarx", "A = [C + B]", 3},
-	//  { "ldbrx", "A = [C + B]", 3},
-	//  { "ldcix", "A = B + C", 3},
+		// No clue how to reprensent them since they are kinda complex..
+		//  { "ldarx", "A = [C + B]", 3},
+		//  { "ldbrx", "A = [C + B]", 3},
+		//  { "ldcix", "A = B + C", 3},
 		{ "ldu", "A = [C + B]", 3},
 		{ "ldux", "A = [C + B]", 3},
 		{ "ldx", "A = [C + B]", 3},
@@ -577,7 +830,7 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "lwzu", "A = word[C + B]", 3},
 		{ "lwzux", "A = word[C + B]", 3},
 		{ "lwzx", "A = word[C + B]", 3},
-//		{ "lxsdx", "A = ???[C + B]", 3},
+		//      { "lxsdx", "A = ???[C + B]", 3},
 		{ "lxvdbx", "A = vector[C + B]", 3},
 		{ "lxvdsx", "A = vector[C + B]", 3},
 		{ "lxvwdx", "A = vector[C + B]", 3},
@@ -618,7 +871,6 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "mfrtcl", "A = rtc_lo", 1},
 		{ "mfrtcu", "A = rtc_hi", 1},
 		{ "mfspefscr", "A = fscr",1},
-		{ "mfspr", "A = spr[B]", 2},
 		{ "mfsr", "A = srB", 3},
 		{ "mfsrin", "A = sr_indirect(B)", 2},
 		{ "mfsrr2", "A = srr2", 1},
@@ -667,7 +919,6 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "mtocrf", "cr0 = B & fxm_mask(A)", 2},
 		{ "mtpid", "pid = A", 1},
 		{ "mtspefscr", "fscr = A", 1},
-		{ "mtspr", "spr[A] = B", 2},
 		{ "mtsr", "srA = B", 2},
 		{ "mtsrin", "sr_indirect(A) = B", 2},
 		{ "mtsrr2", "srr2 = A", 1},
@@ -697,78 +948,78 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "popcntd", "A = count_bits(B)", 2},
 		{ "popcntw", "A = count_bits(B)", 2},
 		{ "ptesync", "sync_page_tbl", 0},
-// Are you kidding? QPX Architecture totally NO.
-/*
-		{ "qvaligni", "A = B + C", 3},
-		{ "qvesplati", "A = B + C", 3},
-		{ "qvfabs", "A = B + C", 3},
-		{ "qvfadd", "A = B + C", 3},
-		{ "qvfadds", "A = B + C", 3},
-		{ "qvfand", "A = B + C", 3},
-		{ "qvfandc", "A = B + C", 3},
-		{ "qvfcfid", "A = B + C", 3},
-		{ "qvfcfids", "A = B + C", 3},
-		{ "qvfcfidu", "A = B + C", 3},
-		{ "qvfcfidus", "A = B + C", 3},
-		{ "qvfclr", "A = B + C", 3},
-		{ "qvfcmpeq", "A = B + C", 3},
-		{ "qvfcmpgt", "A = B + C", 3},
-		{ "qvfcmplt", "A = B + C", 3},
-		{ "qvfcpsgn", "A = B + C", 3},
-		{ "qvfctfb", "A = B + C", 3},
-		{ "qvfctid", "A = B + C", 3},
-		{ "qvfctidu", "A = B + C", 3},
-		{ "qvfctiduz", "A = B + C", 3},
-		{ "qvfctidz", "A = B + C", 3},
-		{ "qvfctiw", "A = B + C", 3},
-		{ "qvfctiwu", "A = B + C", 3},
-		{ "qvfctiwuz", "A = B + C", 3},
-		{ "qvfctiwz", "A = B + C", 3},
-		{ "qvfequ", "A = B + C", 3},
-		{ "qvflogical", "A = B + C", 3},
-		{ "qvfmadd", "A = B + C", 3},
-		{ "qvfmadds", "A = B + C", 3},
-		{ "qvfmr", "A = B + C", 3},
-		{ "qvfmsub", "A = B + C", 3},
-		{ "qvfmsubs", "A = B + C", 3},
-		{ "qvfmul", "A = B + C", 3},
-		{ "qvfmuls", "A = B + C", 3},
-		{ "qvfnabs", "A = B + C", 3},
-		{ "qvfnand", "A = B + C", 3},
-		{ "qvfneg", "A = B + C", 3},
-		{ "qvfnmadd", "A = B + C", 3},
-		{ "qvfnmadds", "A = B + C", 3},
-		{ "qvfnmsub", "A = B + C", 3},
-		{ "qvfnmsubs", "A = B + C", 3},
-		{ "qvfnor", "A = B + C", 3},
-		{ "qvfnot", "A = B + C", 3},
-		{ "qvfor", "A = B + C", 3},
-		{ "qvforc", "A = B + C", 3},
-		{ "qvfperm", "A = B + C", 3},
-		{ "qvfre", "A = B + C", 3},
-		{ "qvfres", "A = B + C", 3},
-		{ "qvfrim", "A = B + C", 3},
-		{ "qvfrin", "A = B + C", 3},
-		{ "qvfrip", "A = B + C", 3},
-		{ "qvfriz", "A = B + C", 3},
-		{ "qvfrsp", "A = B + C", 3},
-		{ "qvfrsqrte", "A = B + C", 3},
-		{ "qvfrsqrtes", "A = B + C", 3},
-		{ "qvfsel", "A = B + C", 3},
-		{ "qvfset", "A = B + C", 3},
-		{ "qvfsub", "A = B + C", 3},
-		{ "qvfsubs", "A = B + C", 3},
-		{ "qvftstnan", "A = B + C", 3},
-		{ "qvfxmadd", "A = B + C", 3},
-		{ "qvfxmadds", "A = B + C", 3},
-		{ "qvfxmul", "A = B + C", 3},
-		{ "qvfxmuls", "A = B + C", 3},
-		{ "qvfxor", "A = B + C", 3},
-		{ "qvfxxcpnmadd", "A = B + C", 3},
-		{ "qvfxxcpnmadds", "A = B + C", 3},
-		{ "qvfxxmadd", "A = B + C", 3},
-		{ "qvfxxmadds", "A = B + C", 3},
-		{ "qvfxxnpmadd", "A = B + C", 3},
+		// Are you kidding? QPX Architecture totally NO.
+		/*
+		   { "qvaligni", "A = B + C", 3},
+		   { "qvesplati", "A = B + C", 3},
+		   { "qvfabs", "A = B + C", 3},
+		   { "qvfadd", "A = B + C", 3},
+		   { "qvfadds", "A = B + C", 3},
+		   { "qvfand", "A = B + C", 3},
+		   { "qvfandc", "A = B + C", 3},
+		   { "qvfcfid", "A = B + C", 3},
+		   { "qvfcfids", "A = B + C", 3},
+		   { "qvfcfidu", "A = B + C", 3},
+		   { "qvfcfidus", "A = B + C", 3},
+		   { "qvfclr", "A = B + C", 3},
+		   { "qvfcmpeq", "A = B + C", 3},
+		   { "qvfcmpgt", "A = B + C", 3},
+		   { "qvfcmplt", "A = B + C", 3},
+		   { "qvfcpsgn", "A = B + C", 3},
+		   { "qvfctfb", "A = B + C", 3},
+		   { "qvfctid", "A = B + C", 3},
+		   { "qvfctidu", "A = B + C", 3},
+		   { "qvfctiduz", "A = B + C", 3},
+		   { "qvfctidz", "A = B + C", 3},
+		   { "qvfctiw", "A = B + C", 3},
+		   { "qvfctiwu", "A = B + C", 3},
+		   { "qvfctiwuz", "A = B + C", 3},
+		   { "qvfctiwz", "A = B + C", 3},
+		   { "qvfequ", "A = B + C", 3},
+		   { "qvflogical", "A = B + C", 3},
+		   { "qvfmadd", "A = B + C", 3},
+		   { "qvfmadds", "A = B + C", 3},
+		   { "qvfmr", "A = B + C", 3},
+		   { "qvfmsub", "A = B + C", 3},
+		   { "qvfmsubs", "A = B + C", 3},
+		   { "qvfmul", "A = B + C", 3},
+		   { "qvfmuls", "A = B + C", 3},
+		   { "qvfnabs", "A = B + C", 3},
+		   { "qvfnand", "A = B + C", 3},
+		   { "qvfneg", "A = B + C", 3},
+		   { "qvfnmadd", "A = B + C", 3},
+		   { "qvfnmadds", "A = B + C", 3},
+		   { "qvfnmsub", "A = B + C", 3},
+		   { "qvfnmsubs", "A = B + C", 3},
+		   { "qvfnor", "A = B + C", 3},
+		   { "qvfnot", "A = B + C", 3},
+		   { "qvfor", "A = B + C", 3},
+		   { "qvforc", "A = B + C", 3},
+		   { "qvfperm", "A = B + C", 3},
+		   { "qvfre", "A = B + C", 3},
+		   { "qvfres", "A = B + C", 3},
+		   { "qvfrim", "A = B + C", 3},
+		   { "qvfrin", "A = B + C", 3},
+		   { "qvfrip", "A = B + C", 3},
+		   { "qvfriz", "A = B + C", 3},
+		   { "qvfrsp", "A = B + C", 3},
+		   { "qvfrsqrte", "A = B + C", 3},
+		   { "qvfrsqrtes", "A = B + C", 3},
+		   { "qvfsel", "A = B + C", 3},
+		   { "qvfset", "A = B + C", 3},
+		   { "qvfsub", "A = B + C", 3},
+		   { "qvfsubs", "A = B + C", 3},
+		   { "qvftstnan", "A = B + C", 3},
+		   { "qvfxmadd", "A = B + C", 3},
+		   { "qvfxmadds", "A = B + C", 3},
+		   { "qvfxmul", "A = B + C", 3},
+		   { "qvfxmuls", "A = B + C", 3},
+		   { "qvfxor", "A = B + C", 3},
+		   { "qvfxxcpnmadd", "A = B + C", 3},
+		   { "qvfxxcpnmadds", "A = B + C", 3},
+		   { "qvfxxmadd", "A = B + C", 3},
+		   { "qvfxxmadds", "A = B + C", 3},
+		   { "qvfxxnpmadd", "A = B + C", 3},
 		{ "qvfxxnpmadds", "A = B + C", 3},
 		{ "qvgpci", "A = B + C", 3},
 		{ "qvlfcdux", "A = B + C", 3},
@@ -829,7 +1080,7 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "qvstfsxa", "A = B + C", 3},
 		{ "qvstfsxi", "A = B + C", 3},
 		{ "qvstfsxia", "A = B + C", 3},
-*/
+		*/
 		{ "rfci", "msr = csrr1; nia = csrr0; ret", 0},
 		{ "rfdi", "msr = drr1; nia = drr0; ret", 0},
 		{ "rfi", "msr = srr1; nia = srr0; ret", 0},
@@ -899,14 +1150,14 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "stxsdx", "vsx[C + B] = A", 3},
 		{ "stxvdbx", "vector double[C + B] = A", 3},
 		{ "stxvwdx", "vector word[C + B] = A", 3},
-		{ "sub", "A = B - C", 3},
-		{ "subc", "A = B - C", 3},
-		{ "subf", "A = B - C", 3},
-		{ "subfc", "A = B - C", 3},
-		{ "subfe", "A = B - C", 3},
-		{ "subfic", "A = B - C", 3},
-		{ "subfme", "A = B - C", 3},
-		{ "subfze", "A = B - C", 3},
+		{ "sub", "A = C - B", 3},
+		{ "subc", "A = C - B", 3},
+		{ "subf", "A = C - B", 3},
+		{ "subfc", "A = C - B", 3},
+		{ "subfe", "A = C - B", 3},
+		{ "subfic", "A = C - B", 3},
+		{ "subfme", "A = C - B", 3},
+		{ "subfze", "A = C - B", 3},
 		{ "sync", "sync_instr_cache", 0},
 		{ "tdeq", "if (A == B) trap", 2},
 		{ "tdeqi", "if (A == B) trap",2},
@@ -952,15 +1203,15 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "vaddsbs", "A = (byte vector) B + C", 3},
 		{ "vaddshs", "A = (half vector) B + C", 3},
 		{ "vaddsws", "A = (word vector) B + C", 3},
-/* too much complexity to represent
-		{ "vaddubm", "A = (byte vector) B + C + (modulo?)", 3},
-		{ "vaddubs", "A = (byte vector) B + C", 3},
-		{ "vaddudm", "A = (vector) B + C + (modulo?)", 3},
-		{ "vadduhm", "A = (half vector) B + C", 3},
-		{ "vadduhs", "A = (half vector) B + C", 3},
-		{ "vadduwm", "A = (word vector) B + C", 3},
-		{ "vadduws", "A = (word vector) B + C", 3},
-*/
+		/* too much complexity to represent
+		   { "vaddubm", "A = (byte vector) B + C + (modulo?)", 3},
+		   { "vaddubs", "A = (byte vector) B + C", 3},
+		   { "vaddudm", "A = (vector) B + C + (modulo?)", 3},
+		   { "vadduhm", "A = (half vector) B + C", 3},
+		   { "vadduhs", "A = (half vector) B + C", 3},
+		   { "vadduwm", "A = (word vector) B + C", 3},
+		   { "vadduws", "A = (word vector) B + C", 3},
+		 */
 		{ "vand", "A = B & C", 3},
 		{ "vandc", "A = B & C", 3},
 		{ "vavgsb", "A = (byte vector) avg(B, C)", 3},
@@ -1005,8 +1256,8 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "vmaxud", "A = (vector) max(B, C)", 3},
 		{ "vmaxuh", "A = (unsigned half vector) max(B, C)", 3},
 		{ "vmaxuw", "A = (unsigned word vector) max(B, C)", 3},
-//	  { "vmhaddshs", "A = (vector)  B + C + D", 4},
-//	  { "vmhraddshs", "A = (vector) B + C + D", 4},
+		//    { "vmhaddshs", "A = (vector)  B + C + D", 4},
+		//    { "vmhraddshs", "A = (vector) B + C + D", 4},
 		{ "vminfp", "A = (float vector) min(B, C)", 3},
 		{ "vminsb", "A = (byte vector) min(B, C)", 3},
 		{ "vminsd", "A = (vector) min(B, C)", 3},
@@ -1016,7 +1267,7 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "vminud", "A = (vector) min(B, C)", 3},
 		{ "vminuh", "A = (unsigned half vector) min(B, C)", 3},
 		{ "vminuw", "A = (unsigned word vector) min(B, C)", 3},
-//	  { "vmladduhm", "A = (unsigned half vector) B + C", 3},
+		//    { "vmladduhm", "A = (unsigned half vector) B + C", 3},
 		{ "vmrghb", "A = (byte vector) merge_hi(B, C)", 3},
 		{ "vmrghh", "A = (half vector) merge_hi(B, C)", 3},
 		{ "vmrghw", "A = (word vector) merge_hi(B, C)", 3},
@@ -1047,17 +1298,17 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "vnor", "A = (vector) B | !C", 3},
 		{ "vor", "A = (vector) B | C", 3},
 		{ "vorc", "A = (vector) B | C", 3},
-// This should be represented as a for loop of bits comparing.. too much complex for pseudo
-//	  { "vperm", "A = (vector) B + C", 3},
+		// This should be represented as a for loop of bits comparing.. too much complex for pseudo
+		//    { "vperm", "A = (vector) B + C", 3},
 		{ "vpkpx", "A = (vector) pack_pixel(B, C)", 3},
 		{ "vpkshss", "A = (half vector) pack_pixel_saturate(B, C)", 3},
 		{ "vpkshus", "A = (unsigned half vector) pack_pixel_saturate(B, C)", 3},
 		{ "vpkswss", "A = (word vector) pack_pixel_saturate(B, C)", 3},
 		{ "vpkswus", "A = (unsigned word vector) pack_pixel_saturate(B, C)", 3},
-//	  { "vpkuhum", "A = (vector) B + C", 3},
-//	  { "vpkuhus", "A = (vector) B + C", 3},
-//	  { "vpkuwum", "A = (vector) B + C", 3},
-//	  { "vpkuwus", "A = (vector) B + C", 3},
+		//    { "vpkuhum", "A = (vector) B + C", 3},
+		//    { "vpkuhus", "A = (vector) B + C", 3},
+		//    { "vpkuwum", "A = (vector) B + C", 3},
+		//    { "vpkuwus", "A = (vector) B + C", 3},
 		{ "vpopcntb", "A = (vector) count_8bits(B)", 2},
 		{ "vpopcntd", "A = (vector) count_64bits(B)", 2},
 		{ "vpopcnth", "A = (vector) count_16bits(B)", 2},
@@ -1096,18 +1347,18 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "vsrh", "A = (half vector) B >> C", 3},
 		{ "vsro", "A = (vector) B >> (octet) C", 3},
 		{ "vsrw", "A = (word vector) B >> C", 3},
-		{ "vsubcuw", "A = (unsigned word vector) (B - C) & 1", 3},
-		{ "vsubfp", "A = (float vector) B - C", 3},
-		{ "vsubsbs", "A = (byte vector) B - C", 3},
-		{ "vsubshs", "A = (half vector) B - C", 3},
-		{ "vsubsws", "A = (word vector) B - C", 3},
-		{ "vsububm", "A = (byte vector) B - C", 3},
-		{ "vsububs", "A = (byte vector) B - C", 3},
-		{ "vsubudm", "A = (unsigned vector) B - C", 3},
-		{ "vsubuhm", "A = (unsigned half vector) B - C", 3},
-		{ "vsubuhs", "A = (unsigned half vector) B - C", 3},
-		{ "vsubuwm", "A = (unsigned word vector) B - C", 3},
-		{ "vsubuws", "A = (unsigned word vector) B - C", 3},
+		{ "vsubcuw", "A = (unsigned word vector) (C - B) & 1", 3},
+		{ "vsubfp", "A = (float vector) C - B", 3},
+		{ "vsubsbs", "A = (byte vector) C - B", 3},
+		{ "vsubshs", "A = (half vector) C - B", 3},
+		{ "vsubsws", "A = (word vector) C - B", 3},
+		{ "vsububm", "A = (byte vector) C - B", 3},
+		{ "vsububs", "A = (byte vector) C - B", 3},
+		{ "vsubudm", "A = (unsigned vector) C - B", 3},
+		{ "vsubuhm", "A = (unsigned half vector) C - B", 3},
+		{ "vsubuhs", "A = (unsigned half vector) C - B", 3},
+		{ "vsubuwm", "A = (unsigned word vector) C - B", 3},
+		{ "vsubuws", "A = (unsigned word vector) C - B", 3},
 		{ "vsumbsws", "A = (word vector) B + C", 3},
 		{ "vsumdsbs", "A = (byte vector) B + C", 3},
 		{ "vsumdshs", "A = (half vector) B + C", 3},
@@ -1143,23 +1394,23 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "xscvsxddp", "A = (double vector) B", 2},
 		{ "xscvuxddp", "A = (double vector) ((unsigned) B)", 2},
 		{ "xsdivdp", "A = (double vector) B / C", 3},
-// multiply add
-//	  { "xsmaddadp", "A = (double vector) B * C + ?", 3},
-//	  { "xsmaddmdp", "A = (double vector) B * C + ?", 3},
+		// multiply add
+		//    { "xsmaddadp", "A = (double vector) B * C + ?", 3},
+		//    { "xsmaddmdp", "A = (double vector) B * C + ?", 3},
 		{ "xsmaxdp", "A = (double vector) max(B, C)", 3},
 		{ "xsmindp", "A = (double vector) min(B, C)", 3},
-// multiply sub
-//	  { "xsmsubadp", "A = (double vector) B * C - ?", 3},
-//	  { "xsmsubmdp", "A = (double vector) B * C - ?", 3},
+		// multiply sub
+		//    { "xsmsubadp", "A = (double vector) B * C - ?", 3},
+		//    { "xsmsubmdp", "A = (double vector) B * C - ?", 3},
 		{ "xsmuldp", "A = (double vector) B * C", 3},
 		{ "xsnabsdp", "A = (double vector) -abs(B)", 2},
 		{ "xsnegdp", "A = (double vector) -B", 2},
-// negative multiply add
-//	  { "xsnmaddadp", "A = (double vector) B * C + ?", 3},
-//	  { "xsnmaddmdp", "A = (double vector) B + C + ?", 3},
-// negative multiply sub
-//	  { "xsnmsubadp", "A = (double vector) B + C - ?", 3},
-//	  { "xsnmsubmdp", "A = (double vector) B + C - ?", 3},
+		// negative multiply add
+		//    { "xsnmaddadp", "A = (double vector) B * C + ?", 3},
+		//    { "xsnmaddmdp", "A = (double vector) B + C + ?", 3},
+		// negative multiply sub
+		//    { "xsnmsubadp", "A = (double vector) B + C - ?", 3},
+		//    { "xsnmsubmdp", "A = (double vector) B + C - ?", 3},
 		{ "xsrdpi",  "A = (double vector) round(B)", 2},
 		{ "xsrdpic", "A = (double vector) round(B)", 2},
 		{ "xsrdpim", "A = (double vector) floor(B)", 2},
@@ -1168,7 +1419,7 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "xsredp", "A = (double vector) 1/B", 2},
 		{ "xsrsqrtedp", "A = (double vector) 1/sqrt(B)", 2},
 		{ "xssqrtdp", "A = sqrt(B)", 2},
-		{ "xssubdp", "A = B - C", 3},
+		{ "xssubdp", "A = C - B", 3},
 		{ "xstdivdp", "A = test_sw_divide(B, C)", 3},
 		{ "xstsqrtdp", "A = test_sw_sqrt(B)", 2},
 		{ "xvabsdp", "A = (double vector) abs(B)", 2},
@@ -1203,38 +1454,38 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "xvcvuxwsp", "A = (float vector) ((unsigned word) B)", 2},
 		{ "xvdivdp", "A = (double vector) B / C", 3},
 		{ "xvdivsp", "A = (float vector) B / C", 3},
-//Multiply add (double & float)
-//	  { "xvmaddadp", "A = B + C", 3},
-//	  { "xvmaddasp", "A = B + C", 3},
-//	  { "xvmaddmdp", "A = B + C", 3},
-//	  { "xvmaddmsp", "A = B + C", 3},
+		//Multiply add (double & float)
+		//    { "xvmaddadp", "A = B + C", 3},
+		//    { "xvmaddasp", "A = B + C", 3},
+		//    { "xvmaddmdp", "A = B + C", 3},
+		//    { "xvmaddmsp", "A = B + C", 3},
 		{ "xvmaxdp", "A = (double vector) max(B)", 2},
 		{ "xvmaxsp", "A = (float vector) max(B)", 2},
 		{ "xvmindp", "A = (double vector) min(B)", 2},
 		{ "xvminsp", "A = (float vector) min(B)", 2},
 		{ "xvmovdp", "A = (double vector) B", 2},
 		{ "xvmovsp", "A = (float vector) B", 2},
-//Multiply sub (double & float)
-//	  { "xvmsubadp", "A = B + C", 3},
-//	  { "xvmsubasp", "A = B + C", 3},
-//	  { "xvmsubmdp", "A = B + C", 3},
-//	  { "xvmsubmsp", "A = B + C", 3},
+		//Multiply sub (double & float)
+		//    { "xvmsubadp", "A = B + C", 3},
+		//    { "xvmsubasp", "A = B + C", 3},
+		//    { "xvmsubmdp", "A = B + C", 3},
+		//    { "xvmsubmsp", "A = B + C", 3},
 		{ "xvmuldp", "A = (double vector) B * C", 3},
 		{ "xvmulsp", "A = (float vector) B * C", 3},
 		{ "xvnabsdp", "A = (double vector) -abs(B)", 2},
 		{ "xvnabssp", "A = (float vector) -abs(B)", 2},
 		{ "xvnegdp", "A = (double vector) -B", 2},
 		{ "xvnegsp", "A = (float vector) -B", 2},
-//Negate multiply add (double & float)
-//	  { "xvnmaddadp", "A = B + C", 3},
-//	  { "xvnmaddasp", "A = B + C", 3},
-//	  { "xvnmaddmdp", "A = B + C", 3},
-//	  { "xvnmaddmsp", "A = B + C", 3},
-//Negate multiply sub (double & float)
-//	  { "xvnmsubadp", "A = B + C", 3},
-//	  { "xvnmsubasp", "A = B + C", 3},
-//	  { "xvnmsubmdp", "A = B + C", 3},
-//	  { "xvnmsubmsp", "A = B + C", 3},
+		//Negate multiply add (double & float)
+		//    { "xvnmaddadp", "A = B + C", 3},
+		//    { "xvnmaddasp", "A = B + C", 3},
+		//    { "xvnmaddmdp", "A = B + C", 3},
+		//    { "xvnmaddmsp", "A = B + C", 3},
+		//Negate multiply sub (double & float)
+		//    { "xvnmsubadp", "A = B + C", 3},
+		//    { "xvnmsubasp", "A = B + C", 3},
+		//    { "xvnmsubmdp", "A = B + C", 3},
+		//    { "xvnmsubmsp", "A = B + C", 3},
 		{ "xvrdpi", "A = (double vector) round(B)", 2},
 		{ "xvrdpic", "A = (double vector) round(B)", 2},
 		{ "xvrdpim", "A = (double vector) floor(B)", 2},
@@ -1251,8 +1502,8 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "xvrsqrtesp", "A = (float vector) 1/sqrt(B)", 2},
 		{ "xvsqrtdp", "A = (double vector) sqrt(B)", 2},
 		{ "xvsqrtsp", "A = (float vector) sqrt(B)", 2},
-		{ "xvsubdp", "A = (double vector) B - C", 3},
-		{ "xvsubsp", "A = (float vector) B - C", 3},
+		{ "xvsubdp", "A = (double vector) C - B", 3},
+		{ "xvsubsp", "A = (float vector) C - B", 3},
 		{ "xvtdivdp", "A = (double vector) B / C", 3},
 		{ "xvtdivsp", "A = (float vector) B / C", 3},
 		{ "xvtsqrtdp", "A = (double vector) test_sw_sqrt(B)", 3},
@@ -1269,10 +1520,10 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "xxmrghw", "A = (word vector) hi(B) || hi(C)", 3},
 		{ "xxmrgld", "A = lo(B) || lo(C)", 3},
 		{ "xxmrglw", "A = (word vector) lo(B) || lo(C)", 3},
-// Permute Doubleword Immediate
-//	  { "xxpermdi", "A = B + C", 3},
-// Select (aka concat)
-//	  { "xxsel", "A = B + C + D", 4},
+		// Permute Doubleword Immediate
+		//    { "xxpermdi", "A = B + C", 3},
+		// Select (aka concat)
+		//    { "xxsel", "A = B + C + D", 4},
 		{ "xxsldwi", "A = B << C", 3},
 		{ "xxspltd", "A = split(B)", 2},
 		{ "xxspltw", "A = (word vector) split(B)", 2},
@@ -1305,36 +1556,36 @@ static int replace(int argc, const char *argv[], char *newstr) {
 							w = cmask64 (w, "63");
 						} else if (letter == 4 && i >= 30 && i <= 31) {
 							w = cmask64 ("0", w);
-						} else if (letter == 4 && i >= 30 && i <= 31) {
-							w = cmask64 ("0", w);
 						} else if (letter == 4 && i == 32) {
 							w = inv_mask64 (argv[4], argv[3]);
 						} else if (letter == 4 && i >= 33 && i <= 35) {
-							w = cmask32 (argv[4], argv[5]);
+							w = cmask32 (argv[3], argv[4]);
 						} else if (letter == 1 && i >= 36 && i <= 43) {
 							int to = atoi (w);
 							switch(to) {
-							case 4:
-								w = "==";
-							case 1:
-							case 8:
-								w = ">";
-							case 5:
-							case 12:
-								w = ">=";
-							case 2:
-							case 16:
-								w = "<";
-							case 6:
-							case 20:
-								w = "<=";
-							case 24:
-								w = "!=";
-							case 31:
-							// If no parameters t[dw][i] 32, 0, 0 just TRAP
-								w = "==";
+								case 4:
+									w = "==";
+								case 1:
+								case 8:
+									w = ">";
+								case 5:
+								case 12:
+									w = ">=";
+								case 2:
+								case 16:
+									w = "<";
+								case 6:
+								case 20:
+									w = "<=";
+								case 24:
+									w = "!=";
+								case 31:
+									// If no parameters t[dw][i] 32, 0, 0 just TRAP
+									w = "==";
 							}
 							w = cmask64("0", w);
+						} else if ((i == 44 && letter == 2) || (i == 45 && letter == 1)) { //spr
+							w = getspr(w);
 						}
 						if (w != NULL) {
 							strcpy (newstr + k, w);
@@ -1373,33 +1624,33 @@ static int parse(RParse *p, const char *data, char *str) {
 	char *buf, *ptr, *optr;
 
 	if (!strcmp (data, "jr ra")) {
-		strcpy (str, "ret");
+		strcpy (str, "return");
 		return true;
 	}
 
 	// malloc can be slow here :?
-	if (!(buf = malloc (len + 1))) {
+	if (!(buf = malloc (len + 1)))
 		return false;
-	}
 	memcpy (buf, data, len + 1);
 
 	r_str_replace_char (buf, '(', ',');
 	r_str_replace_char (buf, ')', ' ');
 	r_str_chop (buf);
-
 	if (*buf) {
-		w0[0]='\0';
-		w1[0]='\0';
-		w2[0]='\0';
-		w3[0]='\0';
-		w4[0]='\0';
+		w0[0] = '\0';
+		w1[0] = '\0';
+		w2[0] = '\0';
+		w3[0] = '\0';
+		w4[0] = '\0';
 		ptr = strchr (buf, ' ');
 		if (!ptr) {
 			ptr = strchr (buf, '\t');
 		}
 		if (ptr) {
 			*ptr = '\0';
-			for (++ptr; *ptr==' '; ptr++);
+			for (++ptr; *ptr == ' '; ptr++) {
+				//nothing to see here
+			}
 			strncpy (w0, buf, WSZ - 1);
 			strncpy (w1, ptr, WSZ - 1);
 
@@ -1407,21 +1658,22 @@ static int parse(RParse *p, const char *data, char *str) {
 			ptr = strchr (ptr, ',');
 			if (ptr) {
 				*ptr = '\0';
-				for (++ptr; *ptr==' '; ptr++) {
+				for (++ptr; *ptr == ' '; ptr++) {
 					//nothing to see here
 				}
 				strncpy (w1, optr, WSZ - 1);
 				strncpy (w2, ptr, WSZ - 1);
-				optr=ptr;
+				optr = ptr;
 				ptr = strchr (ptr, ',');
 				if (ptr) {
 					*ptr = '\0';
-					for (++ptr; *ptr==' '; ptr++) {
+					for (++ptr; *ptr == ' '; ptr++) {
 						//nothing to see here
 					}
 					strncpy (w2, optr, WSZ - 1);
 					strncpy (w3, ptr, WSZ - 1);
 					optr = ptr;
+					// bonus
 					ptr = strchr (ptr, ',');
 					if (ptr) {
 						*ptr = '\0';
@@ -1445,35 +1697,35 @@ static int parse(RParse *p, const char *data, char *str) {
 				}
 			}
 			replace (nw, wa, str);
-{
-	char *p = strdup (str);
-	p = r_str_replace (p, "+ -", "- ", 0);
-	p = r_str_replace (p, " + ]", "]  ", 0);
-//  p = r_str_replace (p, "if (r0 == r0) trap", "trap			 ", 0);
+			{
+				char *p = strdup (str);
+				p = r_str_replace (p, "+ -", "- ", 0);
+				p = r_str_replace (p, " + ]", "]  ", 0);
+				//  p = r_str_replace (p, "if (r0 == r0) trap", "trap            ", 0);
 #if EXPERIMENTAL_ZERO
-	p = r_str_replace (p, "zero", "0", 0);
-	if (!memcmp (p, "0 = ", 4)) *p = 0; // nop
+				p = r_str_replace (p, "zero", "0", 0);
+				if (!memcmp (p, "0 = ", 4)) *p = 0; // nop
 #endif
-	if (!strcmp (w1, w2)) {
-		char a[64], b[64];
+				if (!strcmp (w1, w2)) {
+					char a[64], b[64];
 #define REPLACE(x,y) \
-		snprintf (a, 64, x, w1, w1); \
-		snprintf (b, 64, y, w1); \
-		p = r_str_replace (p, a, b, 0);
+					snprintf (a, 64, x, w1, w1); \
+					snprintf (b, 64, y, w1); \
+					p = r_str_replace (p, a, b, 0);
 
-// TODO: optimize
-		REPLACE ("%s = %s +", "%s +=");
-		REPLACE ("%s = %s -", "%s -=");
-		REPLACE ("%s = %s &", "%s &=");
-		REPLACE ("%s = %s |", "%s |=");
-		REPLACE ("%s = %s ^", "%s ^=");
-		REPLACE ("%s = %s >>", "%s >>=");
-		REPLACE ("%s = %s <<", "%s <<=");
-	}
-	p = r_str_replace (p, ":", "0000", 0);
-	strcpy (str, p);
-	free (p);
-}
+					// TODO: optimize
+					REPLACE ("%s = %s +", "%s +=");
+					REPLACE ("%s = %s -", "%s -=");
+					REPLACE ("%s = %s &", "%s &=");
+					REPLACE ("%s = %s |", "%s |=");
+					REPLACE ("%s = %s ^", "%s ^=");
+					REPLACE ("%s = %s >>", "%s >>=");
+					REPLACE ("%s = %s <<", "%s <<=");
+				}
+				p = r_str_replace (p, ":", "0000", 0);
+				strcpy (str, p);
+				free (p);
+			}
 		}
 	}
 	free (buf);

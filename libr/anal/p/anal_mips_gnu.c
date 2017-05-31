@@ -191,7 +191,7 @@ static int mips_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *b, int len) {
 			break;
 		}
 		//family = 'J';
-	} else if ((optype & 0x10) == 0x1c) {
+	} else if ((optype & 0x1c) == 0x1c) {
 /*
 	C-TYPE
 	======
@@ -245,7 +245,7 @@ static int mips_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *b, int len) {
 		if (((optype >> 2) ^ 0x3) && (imm & 0x8000))
 			imm = 0 - (0x10000 - imm);
 		switch (optype) {
-		case 1: if (rt) { /* bgez */ } else { /* bltz */ }
+		case 1: // if (rt) { /* bgez */ } else { /* bltz */ }
 		case 4: // beq
 		case 5: // bne // also bnez
 		case 6: // blez
@@ -524,7 +524,7 @@ static int archinfo(RAnal *anal, int q) {
 	return 4;
 }
 
-struct r_anal_plugin_t r_anal_plugin_mips_gnu = {
+RAnalPlugin r_anal_plugin_mips_gnu = {
 	.name = "mips.gnu",
 	.desc = "MIPS code analysis plugin",
 	.license = "LGPL3",

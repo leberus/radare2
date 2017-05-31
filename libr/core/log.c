@@ -8,37 +8,46 @@ R_API int r_core_log_list(RCore *core, int n, int nth, char fmt) {
 	RStrpool *sp = core->log->sp;
 	char *str = sp->str;
 
-	if (fmt=='j') r_cons_printf ("[");
-	for (i=idx=0; str && *str; i++, id++) {
-		if ((n&&n<=id)||!n) {
+	if (fmt == 'j') {
+		r_cons_printf ("[");
+	}
+	for (i = idx = 0; str && *str; i++, id++) {
+		if ((n && n <= id) || !n) {
 			switch (fmt) {
-			case 'j':r_cons_printf ("%s[%d,\"%s\"]",
-				printed?",":"",id, str); break;
-			case 't':r_cons_println (str); break;
-			case '*':r_cons_printf ("\"l %s\"\n", str); break;
+			case 'j': r_cons_printf ("%s[%d,\"%s\"]",
+					printed? ",": "", id, str); break;
+			case 't': r_cons_println (str); break;
+			case '*': r_cons_printf ("\"l %s\"\n", str); break;
 			default: r_cons_printf ("%d %s\n", id, str); break;
 			}
 			printed++;
-			if (nth && printed >= nth) break;
+			if (nth && printed >= nth) {
+				break;
+			}
 		}
 		str = r_strpool_next (sp, idx);
-		if (!str) break;
+		if (!str) {
+			break;
+		}
 		idx = r_strpool_get_index (sp, str);
 		count++;
 	}
-	if (fmt == 'j')
+	if (fmt == 'j') {
 		r_cons_printf ("]\n");
+	}
 	return count;
 }
 
-R_API RCoreLog *r_core_log_new () {
+R_API RCoreLog *r_core_log_new() {
 	RCoreLog *log = R_NEW0 (RCoreLog);
-	if (!log) return NULL;
+	if (!log) {
+		return NULL;
+	}
 	r_core_log_init (log);
 	return log;
 }
 
-R_API void r_core_log_init (RCoreLog *log) {
+R_API void r_core_log_init(RCoreLog *log) {
 	log->first = 1;
 	log->last = 1;
 	log->sp = r_strpool_new (0);
@@ -50,20 +59,44 @@ R_API void r_core_log_free(RCoreLog *log) {
 }
 
 R_API void r_core_log_add(RCore *core, const char *msg) {
+	static bool inProcess = false;
 	r_strpool_append (core->log->sp, msg);
 	core->log->last++;
+	if (core->cmdlog && *core->cmdlog) {
+		if (inProcess) {
+			// avoid infinite recursive calls
+			return;
+		}
+		inProcess = true;
+		r_core_cmd0 (core, core->cmdlog);
+		inProcess = false;
+	}
 }
 
 R_API void r_core_log_del(RCore *core, int n) {
 	int idx;
-	if (n>0) {
-		if (n > core->log->last)
-			n = core->log->last;
-		idx = n-core->log->first;
-		if (idx<0) return;
-		core->log->first += idx+1;
-		/* s= */ r_strpool_get_i (core->log->sp, idx);
-		r_strpool_slice (core->log->sp, idx);
+	if (n > 0) {
+		if (n + 1 >= core->log->last) {
+			core->log->first = core->log->last;
+			r_strpool_empty (core->log->sp);
+			return;
+		}
+		if (n < core->log->first) {
+			return;
+		}
+		idx = n - core->log->first;
+		if (idx < 0) {
+			return;
+		}
+		core->log->first += idx + 1;
+		char *msg = r_strpool_get_i (core->log->sp, idx);
+		// if (idx >= core->log->last) {
+		if (!msg || !*msg) {
+			core->log->first = core->log->last;
+			r_strpool_empty (core->log->sp);
+		} else {
+			r_strpool_slice (core->log->sp, idx);
+		}
 	} else {
 		core->log->first = core->log->last;
 		r_strpool_empty (core->log->sp);

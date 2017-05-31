@@ -2,16 +2,16 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
+#include "r_types.h"
 
-#if _WIN32 || __CYGWIN__ || MINGW32
+#if __WINDOWS__ || __CYGWIN__ || MINGW32
 #include <windows.h>
 #include <fcntl.h>
 #include "transport.h"
 
 static void *iob_pipe_open (const char *path) {
 	HANDLE hPipe;
-	hPipe = CreateFile (path, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+	hPipe = CreateFileA (path, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
 	eprintf ("iob_pipe_open: invocado %s\n", path);
 	if (hPipe != INVALID_HANDLE_VALUE) {
 		return (void *)(HANDLE)hPipe;

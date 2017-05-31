@@ -2,6 +2,10 @@
 
 #include <r_util.h>
 #include <signal.h>
+#if _MSC_VER
+#include <process.h> // to compile execl under msvc windows
+#include <direct.h>  // to compile chdir under msvc windows
+#endif
 
 static bool enabled = false;
 static bool disabled = false;
@@ -26,7 +30,6 @@ static bool inHomeWww(const char *path) {
  */
 R_API int r_sandbox_check_path (const char *path) {
 	size_t root_len;
-	char ch;
 	char *p;
 	/* XXX: the sandbox can be bypassed if a directory is symlink */
 
@@ -72,6 +75,7 @@ R_API int r_sandbox_check_path (const char *path) {
 		return 0;
 	}
 #if __UNIX__
+	char ch;
 	if (readlink (path, &ch, 1) != -1) {
 		return false;
 	}
@@ -106,7 +110,7 @@ R_API bool r_sandbox_enable (bool e) {
 #if LIBC_HAVE_PLEDGE
 	if (enabled && pledge ("stdio rpath tty prot_exec", NULL) == -1) {
 		eprintf ("sandbox: pledge call failed\n");
-		exit (1);
+		return false;
 	}
 #endif
 	return enabled;
@@ -238,8 +242,9 @@ R_API FILE *r_sandbox_fopen (const char *path, const char *mode) {
 		return NULL;
 	}
 	if (enabled) {
-		if (strchr (mode, 'w') || strchr (mode, 'a') || strchr (mode, '+'))
+		if (strchr (mode, 'w') || strchr (mode, 'a') || strchr (mode, '+')) {
 			return NULL;
+		}
 		epath = expand_home (path);
 		if (!r_sandbox_check_path (epath)) {
 			free (epath);
@@ -277,7 +282,26 @@ R_API int r_sandbox_kill(int pid, int sig) {
 #endif
 	return -1;
 }
-
+#if __WINDOWS__ && !defined(__CYGWIN__)
+R_API HANDLE r_sandbox_opendir (const char *path, WIN32_FIND_DATAW *entry) {
+	wchar_t dir[MAX_PATH];
+	wchar_t *wcpath = 0;
+	if (!path) {
+		return NULL;
+	}
+	if (r_sandbox_enable (0)) {
+		if (path && !r_sandbox_check_path (path)) {
+			return NULL;
+		}
+	}
+	if (!(wcpath = r_utf8_to_utf16 (path))) {
+		return NULL;
+	}
+	swprintf (dir, MAX_PATH, L"%ls\\*.*", wcpath);
+	free (wcpath);
+	return FindFirstFileW (dir, entry);
+}
+#else
 R_API DIR* r_sandbox_opendir (const char *path) {
 	if (!path)
 		return NULL;
@@ -288,7 +312,7 @@ R_API DIR* r_sandbox_opendir (const char *path) {
 	}
 	return opendir (path);
 }
-
+#endif
 R_API int r_sys_stop () {
 	int pid;
 	if (enabled) {

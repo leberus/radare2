@@ -201,7 +201,7 @@ static int arcompact_genops_jmp(RAnalOp *op, ut64 addr, arc_fields *f, ut64 basi
 }
 
 static int arcompact_genops(RAnalOp *op, ut64 addr, ut32 words[2]) {
-	arc_fields fields;
+	arc_fields fields = {0};
 
 	fields.format = (words[0] & 0x00c00000) >> 22;
 	fields.subopcode = (words[0] & 0x003f0000) >> 16;
@@ -455,6 +455,10 @@ static int arcompact_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, in
 	if (addr % 2 != 0) {
 		/* this fixes some of the reverse dissassembly issues */
 		op->type = R_ANAL_OP_TYPE_ILL;
+		return 0;
+	}
+	if (len < 8) {
+		//when r_read_me32/be32 oob read
 		return 0;
 	}
 

@@ -1,8 +1,8 @@
-/* radare2 - LGPL - Copyright 2009-2016 - pancake */
+/* radare2 - LGPL - Copyright 2009-2017 - pancake */
 
 #include <r_core.h>
 #include <r_socket.h>
-#include "../config.h"
+#include <config.h>
 #include <r_util.h>
 #if __UNIX__
 #include <signal.h>
@@ -22,6 +22,8 @@ static ut64 letter_divs[R_CORE_ASMQJMPS_LEN_LETTERS - 1] = {
 #define TMP_ARGV_SZ 512
 static const char *tmp_argv[TMP_ARGV_SZ];
 static bool tmp_argv_heap = false;
+
+extern int r_is_heap (void *p);
 
 static void r_line_free_autocomplete(RLine *line) {
 	int i;
@@ -74,7 +76,7 @@ static int on_fcn_rename(void *_anal, void* _user, RAnalFunction *fcn, const cha
 	RCore *core = (RCore*)_user;
 	const char *cmd = r_config_get (core->config, "cmd.fcn.rename");
 	if (cmd && *cmd) {
-// XXX: wat do with old name here?
+		// XXX: wat do with old name here?
 		ut64 oaddr = core->offset;
 		ut64 addr = fcn->addr;
 		r_core_seek (core, addr, 1);
@@ -203,6 +205,11 @@ static const char *getName(RCore *core, ut64 addr) {
 	return item ? item->name : NULL;
 }
 
+static void archbits(RCore *core, ut64 addr) {
+	r_anal_build_range_on_hints (core->anal);
+	r_core_seek_archbits (core, addr);
+}
+
 R_API int r_core_bind(RCore *core, RCoreBind *bnd) {
 	bnd->core = core;
 	bnd->bphit = (RCoreDebugBpHit)r_core_debug_breakpoint_hit;
@@ -211,6 +218,7 @@ R_API int r_core_bind(RCore *core, RCoreBind *bnd) {
 	bnd->puts = (RCorePuts)r_cons_strcat;
 	bnd->setab = (RCoreSetArchBits)setab;
 	bnd->getName = (RCoreGetName)getName;
+	bnd->archbits = (RCoreSeekArchBits)archbits;
 	return true;
 }
 
@@ -367,7 +375,7 @@ static ut64 num_callback(RNum *userptr, const char *str, int *ok) {
 		// push state
 		if (str[0] && str[1]) {
 			const char *q;
-			char *o = strdup (str+1);
+			char *o = strdup (str + 1);
 			if (o) {
 				q = r_num_calc_index (core->num, NULL);
 				if (q) {
@@ -381,7 +389,7 @@ static ut64 num_callback(RNum *userptr, const char *str, int *ok) {
 		}
 		// pop state
 		if (ok) *ok = 1;
-		ut8 buf[sizeof (ut64)] = {0};
+		ut8 buf[sizeof (ut64)] = R_EMPTY;
 		(void)r_io_read_at (core->io, n, buf, refsz);
 		switch (refsz) {
 		case 8:
@@ -472,7 +480,7 @@ static ut64 num_callback(RNum *userptr, const char *str, int *ok) {
 				RListIter *iter;
 				RIOSection *s;
 				r_list_foreach (core->io->sections, iter, s) {
-					if (!s->vaddr && s->offset) {
+					if (!s->vaddr && s->paddr) {
 						continue;
 					}
 					if (s->vaddr < lower) lower = s->vaddr;
@@ -502,7 +510,7 @@ static ut64 num_callback(RNum *userptr, const char *str, int *ok) {
 			}
 			return 0LL;
 		case 'D':
-			if (IS_NUMBER (str[2])) {
+			if (IS_DIGIT (str[2])) {
 				return getref (core, atoi (str + 2), 'r', R_ANAL_REF_TYPE_DATA);
 			} else {
 				RDebugMap *map;
@@ -609,7 +617,14 @@ static const char *radare_argv[] = {
 	"pD", "px", "pX", "po", "pf", "pf.", "pf*", "pf*.", "pfd", "pfd.", "pv", "p=", "p-",
 	"pfj", "pfj.", "pfv", "pfv.",
 	"pm", "pr", "pt", "ptd", "ptn", "pt?", "ps", "pz", "pu", "pU", "p?",
-	"#!pipe", "z", "zf", "zF", "zFd", "zh", "zn", "zn-",
+	"z", "z*", "zj", "z-", "z-*",
+	"za", "zaf", "zaF",
+	"zo", "zoz", "zos",
+	"zfd", "zfs", "zfz",
+	"z/", "z/*",
+	"zc",
+	"zs", "zs+", "zs-", "zs-*", "zsr",
+	"#!pipe",
 	NULL
 };
 
@@ -633,7 +648,7 @@ static int autocomplete(RLine *line) {
 	if (core) {
 		r_core_free_autocomplete (core);
 		char *ptr = strchr (line->buffer.data, '@');
-		if (ptr && line->buffer.data+line->buffer.index >= ptr) {
+		if (ptr && strchr (ptr + 1, ' ') && line->buffer.data+line->buffer.index >= ptr) {
 			int sdelta, n, i = 0;
 			ptr = (char *)r_str_chop_ro (ptr+1);
 			n = strlen (ptr);//(line->buffer.data+sdelta);
@@ -742,14 +757,14 @@ static int autocomplete(RLine *line) {
 			} else {
 				*pfx = 0;
 			}
-			RStrHT *sht = core->print->formats;
-			int *i, j = 0;
-			r_list_foreach (sht->ls, iter, i) {
-				int idx = ((int)(size_t)i)-1;
-				const char *key = r_strpool_get (sht->sp, idx);
+			SdbList *sls = sdb_foreach_list (core->print->formats, false);
+			SdbListIter *iter;
+			SdbKv *kv;
+			int j = 0;
+			ls_foreach (sls, iter, kv) {
 				int len = strlen (line->buffer.data + chr);
-				if (!len || !strncmp (line->buffer.data + chr, key, len)) {
-					tmp_argv[j++] = r_str_newf ("pf%s.%s", pfx, key);
+				if (!len || !strncmp (line->buffer.data + chr, kv->key, len)) {
+					tmp_argv[j++] = r_str_newf ("pf%s.%s", pfx, kv->key);
 				}
 			}
 			if (j > 0) tmp_argv_heap = true;
@@ -821,7 +836,12 @@ static int autocomplete(RLine *line) {
 		     !strncmp (line->buffer.data, "oc ", 3) ||
 		     !strncmp (line->buffer.data, "r2 ", 3) ||
 		     !strncmp (line->buffer.data, "cd ", 3) ||
-		     !strncmp (line->buffer.data, "zF ", 3) ||
+		     !strncmp (line->buffer.data, "zo ", 3) ||
+		     !strncmp (line->buffer.data, "zoz ", 4) ||
+		     !strncmp (line->buffer.data, "zos ", 4) ||
+		     !strncmp (line->buffer.data, "zfd ", 4) ||
+		     !strncmp (line->buffer.data, "zfs ", 4) ||
+		     !strncmp (line->buffer.data, "zfz ", 4) ||
 		     !strncmp (line->buffer.data, "on ", 3) ||
 		     !strncmp (line->buffer.data, "op ", 3) ||
 		     !strncmp (line->buffer.data, ". ", 2) ||
@@ -992,6 +1012,28 @@ openfile:
 				if (i + 1 < TMP_ARGV_SZ) {
 					tmp_argv[i++] = "*";
 				}
+			}
+			tmp_argv[i] = NULL;
+			line->completion.argc = i;
+			line->completion.argv = tmp_argv;
+		} else if (!strncmp (line->buffer.data, "zs ", 3)) {
+			const char *msg = line->buffer.data + 3;
+			RSpaces zs = core->anal->zign_spaces;
+			int j, i = 0;
+			for (j = 0; j < R_SPACES_MAX; j++) {
+				if (zs.spaces[j]) {
+					if (i == TMP_ARGV_SZ - 1) {
+						break;
+					}
+					if (!strncmp (msg, zs.spaces[j], strlen (msg))) {
+						if (i + 1 < TMP_ARGV_SZ) {
+							tmp_argv[i++] = zs.spaces[j];
+						}
+					}
+				}
+			}
+			if (strlen (msg) == 0 && i + 1 < TMP_ARGV_SZ) {
+				tmp_argv[i++] = "*";
 			}
 			tmp_argv[i] = NULL;
 			line->completion.argc = i;
@@ -1241,7 +1283,7 @@ static char *getbitfield(void *_core, const char *name, ut64 val) {
 	isenum = sdb_const_get (core->anal->sdb_types, name, 0);
 	if (isenum && !strcmp (isenum, "enum")) {
 		int isFirst = true;
-		ret = r_str_concatf (ret, "0x%08"PFMT64x" : ", val);
+		ret = r_str_appendf (ret, "0x%08"PFMT64x" : ", val);
 		for (i = 0; i < 32; i++) {
 			if (!(val & (1 << i))) {
 				continue;
@@ -1251,12 +1293,12 @@ static char *getbitfield(void *_core, const char *name, ut64 val) {
 			if (isFirst) {
 				isFirst = false;
 			} else {
-				ret = r_str_concat (ret, " | ");
+				ret = r_str_append (ret, " | ");
 			}
 			if (res) {
-				ret = r_str_concat (ret, res);
+				ret = r_str_append (ret, res);
 			} else {
-				ret = r_str_concatf (ret, "0x%x", (1<<i));
+				ret = r_str_appendf (ret, "0x%x", (1<<i));
 			}
 		}
 	} else {
@@ -1395,10 +1437,11 @@ static char *r_core_anal_hasrefs_to_depth(RCore *core, ut64 value, int depth) {
 	}
 	{
 		ut8 buf[128], widebuf[256];
-		const char *c = core->cons->pal.ai_ascii;
-		const char *cend = Color_RESET;
+		const char *c = r_config_get_i (core->config, "scr.color")? core->cons->pal.ai_ascii: "";
+		const char *cend = (c && *c) ? Color_RESET: "";
 		int len, r;
-		r = r_io_read_at (core->io, value, buf, sizeof(buf));
+		r = r_io_read_at (core->io, value, buf, sizeof (buf));
+		buf[sizeof (buf) - 1] = 0;
 		if (r) {
 			switch (is_string (buf, sizeof(buf), &len)) {
 			case 1:
@@ -1449,6 +1492,9 @@ R_API const char *r_core_anal_optype_colorfor(RCore *core, ut64 addr, bool verbo
 	if (!(core->print->flags & R_PRINT_FLAGS_COLOR)) {
 		return NULL;
 	}
+	if (!r_config_get_i (core->config, "scr.color")) {
+		return NULL;
+	}
 	type = r_core_anal_address (core, addr);
 	if (type & R_ANAL_ADDR_TYPE_EXEC)
 		return core->cons->pal.ai_exec; //Color_RED;
@@ -1477,7 +1523,15 @@ static int mywrite(const ut8 *buf, int len) {
 	return r_cons_memcat ((const char *)buf, len);
 }
 
-R_API int r_core_init(RCore *core) {
+static bool r_core_anal_log(struct r_anal_t *anal, const char *msg) {
+	RCore *core = anal->user;
+	if (core->cfglog) {
+		r_core_log_add (core, msg);
+	}
+	return true;
+}
+
+R_API bool r_core_init(RCore *core) {
 	core->blocksize = R_CORE_BLOCKSIZE;
 	core->block = (ut8*)calloc (R_CORE_BLOCKSIZE + 1, 1);
 	if (!core->block) {
@@ -1486,6 +1540,7 @@ R_API int r_core_init(RCore *core) {
 		return false;
 	}
 	r_core_setenv (core);
+	core->lock = r_th_lock_new (true);
 	core->cmd_depth = R_CORE_CMD_DEPTH + 1;
 	core->sdb = sdb_new (NULL, "r2kv.sdb", 0); // XXX: path must be in home?
 	core->lastsearch = NULL;
@@ -1501,6 +1556,7 @@ R_API int r_core_init(RCore *core) {
 	core->print->get_bitfield = getbitfield;
 	core->print->offname = r_core_print_offname;
 	core->print->cb_printf = r_cons_printf;
+	core->print->cb_color = r_cons_rainbow_get;
 	core->print->write = mywrite;
 	core->print->disasm = __disasm;
 	core->print->colorfor = (RPrintColorFor)r_core_anal_optype_colorfor;
@@ -1562,7 +1618,7 @@ R_API int r_core_init(RCore *core) {
 	core->assembler->num = core->num;
 	r_asm_set_user_ptr (core->assembler, core);
 	core->anal = r_anal_new ();
-
+	core->anal->log = r_core_anal_log;
 	core->anal->meta_spaces.cb_printf = r_cons_printf;
 	core->anal->cb.on_fcn_new = on_fcn_new;
 	core->anal->cb.on_fcn_delete = on_fcn_delete;
@@ -1584,7 +1640,6 @@ R_API int r_core_init(RCore *core) {
 	core->io->cb_core_cmd = core_cmd_callback;
 	core->io->cb_core_cmdstr = core_cmdstr_callback;
 	core->io->cb_core_post_write = core_post_write_callback;
-	core->sign = r_sign_new ();
 	core->search = r_search_new (R_SEARCH_KEYWORD);
 	r_io_undo_enable (core->io, 1, 0); // TODO: configurable via eval
 	core->fs = r_fs_new ();
@@ -1614,19 +1669,16 @@ R_API int r_core_init(RCore *core) {
 	r_core_bind (core, &(core->anal->coreb));
 
 	core->file = NULL;
-	core->files = r_list_new ();
-	core->files->free = (RListFree)r_core_file_free;
+	core->files = r_list_newf ((RListFree)r_core_file_free);
 	core->offset = 0LL;
 	r_core_cmd_init (core);
 	core->dbg = r_debug_new (true);
 	r_core_bind (core, &core->dbg->corebind);
-	core->dbg->cb_printf = (PrintfCallback)r_cons_printf;
 	core->dbg->anal = core->anal; // XXX: dupped instance.. can cause lost pointerz
 	//r_debug_use (core->dbg, "native");
 // XXX pushing unititialized regstate results in trashed reg values
 //	r_reg_arena_push (core->dbg->reg); // create a 2 level register state stack
 //	core->dbg->anal->reg = core->anal->reg; // XXX: dupped instance.. can cause lost pointerz
-	core->sign->cb_printf = r_cons_printf;
 	core->io->cb_printf = r_cons_printf;
 	core->dbg->cb_printf = r_cons_printf;
 	core->dbg->bp->cb_printf = r_cons_printf;
@@ -1691,7 +1743,6 @@ R_API RCore *r_core_fini(RCore *c) {
 	r_cons_free ();
 	r_cons_singleton()->teefile = NULL; // HACK
 	r_search_free (c->search);
-	r_sign_free (c->sign);
 	r_flag_free (c->flags);
 	r_fs_free (c->fs);
 	r_egg_free (c->egg);
@@ -1782,8 +1833,7 @@ static void chop_prompt (const char *filename, char *tmp, size_t max_tmp_size) {
 }
 
 static void set_prompt (RCore *r) {
-	size_t max_tmp_size = 128;
-	char tmp[max_tmp_size];
+	char tmp[128];
 	char *prompt = NULL;
 	char *filename = strdup ("");
 	const char *cmdprompt = r_config_get (r->config, "cmd.prompt");
@@ -1817,7 +1867,7 @@ static void set_prompt (RCore *r) {
 
 		a = ((r->offset >> 16) << 12);
 		b = (r->offset & 0xffff);
-		snprintf (tmp, max_tmp_size, "%04x:%04x", a, b);
+		snprintf (tmp, 128, "%04x:%04x", a, b);
 	} else {
 		char p[64], sec[32];
 		int promptset = false;
@@ -1836,7 +1886,7 @@ static void set_prompt (RCore *r) {
 		snprintf (tmp, sizeof (tmp), "%s%s", sec, p);
 	}
 
-	chop_prompt (filename, tmp, max_tmp_size);
+	chop_prompt (filename, tmp, 128);
 	prompt = r_str_newf ("%s%s[%s%s]>%s ", filename, BEGIN, remote,
 		tmp, END);
 	r_line_set_prompt (prompt ? prompt : "");
@@ -2322,7 +2372,7 @@ R_API RBuffer *r_core_syscallf (RCore *core, const char *name, const char *fmt, 
 R_API RBuffer *r_core_syscall (RCore *core, const char *name, const char *args) {
 	RBuffer *b = NULL;
 	char code[1024];
-	int i, num;
+	int num;
 
 	num = r_syscall_get_num (core->anal->syscall, name);
 	if (!num) {
@@ -2344,12 +2394,79 @@ R_API RBuffer *r_core_syscall (RCore *core, const char *name, const char *args) 
 		eprintf ("r_egg_assemble: invalid assembly\n");
 	}
 	if ((b = r_egg_get_bin (core->egg))) {
+#if 0
 		if (b->length > 0) {
 			for (i = 0; i < b->length; i++) {
 				r_cons_printf ("%02x", b->buf[i]);
 			}
 			r_cons_printf ("\n");
 		}
+#endif
 	}
 	return b;
+}
+
+
+R_API int r_core_search_value_in_range(RCore *core, ut64 from, ut64 to, ut64 vmin,
+				     ut64 vmax, int vsize, bool asterisk, inRangeCb cb) {
+	int i, match, align = core->search->align, hitctr = 0;
+	bool vinfun = r_config_get_i (core->config, "anal.vinfun");
+	bool vinfunr = r_config_get_i (core->config, "anal.vinfunrange");
+	ut8 buf[4096];
+	ut64 v64, value = 0;
+	ut32 v32;
+	ut16 v16;
+	if (from >= to) {
+		eprintf ("Error: from must be lower than to\n");
+		return -1;
+	}
+	if (vmin >= vmax) {
+		eprintf ("Error: vmin must be lower than vmax\n");
+		return -1;
+	}
+	r_cons_break_push (NULL, NULL);
+	while (from < to) {
+		memset (buf, 0, sizeof (buf)); // probably unnecessary
+		(void) r_io_read_at (core->io, from, buf, sizeof (buf));
+		if (r_cons_is_breaked ()) {
+			goto beach;
+		}
+		for (i = 0; i < sizeof (buf) - vsize; i++) {
+			void *v = (buf + i);
+			ut64 addr = from + i;
+			if (r_cons_is_breaked ()) {
+				goto beach;
+			}
+			if (align && (addr) % align) {
+				continue;
+			}
+			match = false;
+			switch (vsize) {
+			case 1: value = *(ut8 *) (v); match = (buf[i] >= vmin && buf[i] <= vmax); break;
+			case 2: v16 = *((ut16 *) (v)); match = (v16 >= vmin && v16 <= vmax); value = v16; break;
+			case 4: v32 = *((ut32 *) (v)); match = (v32 >= vmin && v32 <= vmax); value = v32; break;
+			case 8: v64 = *((ut64 *) (v)); match = (v64 >= vmin && v64 <= vmax); value = v64; break;
+			default: eprintf ("Unknown vsize\n"); return -1;
+			}
+			if (match && !vinfun) {
+				if (vinfunr) {
+					if (r_anal_get_fcn_in_bounds (core->anal, addr, R_ANAL_FCN_TYPE_NULL)) {
+						match = false;
+					}
+				} else {
+					if (r_anal_get_fcn_in (core->anal, addr, R_ANAL_FCN_TYPE_NULL)) {
+						match = false;
+					}
+				}
+			}
+			if (match) {
+				cb (core, addr, value, vsize, asterisk, hitctr);
+				hitctr++;
+			}
+		}
+		from += sizeof (buf);
+	}
+beach:
+	r_cons_break_pop ();
+	return hitctr;
 }

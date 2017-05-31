@@ -1,4 +1,4 @@
-/* radare2 - LGPL - Copyright 2009-2016 - pancake */
+/* radare2 - LGPL - Copyright 2009-2017 - pancake */
 
 #include <stddef.h>
 #include <stdbool.h>
@@ -10,6 +10,7 @@ static bool getNext = false;
 static bool load_theme(RCore *core, const char *path) {
 	core->cmdfilter = "ec ";
 	bool res = r_core_cmd_file (core, path);
+	r_cons_pal_update_event ();
 	core->cmdfilter = NULL;
 	return res;
 }
@@ -167,7 +168,9 @@ static int cmd_eval(void *data, const char *input) {
 	RCore *core = (RCore *)data;
 	switch (input[0]) {
 	case 't': // env
-		if (input[1]==' ' && input[2]) {
+		if (input[1] == 'a') {
+			r_cons_printf ("%s\n", (r_num_rand (10) % 2)? "wen": "son");
+		} else if (input[1]==' ' && input[2]) {
 			RConfigNode *node = r_config_node_get (core->config, input+2);
 			if (node) {
 				const char *type = r_config_node_type (node);
@@ -211,6 +214,9 @@ static int cmd_eval(void *data, const char *input) {
 		return cmd_quit (data, "");
 	case 'j': // json
 		r_config_list (core->config, NULL, 'j');
+		break;
+	case 'v': // verbose
+		r_config_list (core->config, input + 1, 'v');
 		break;
 	case 'q': // quiet list of eval keys
 		r_config_list (core->config, NULL, 'q');
@@ -349,7 +355,6 @@ static int cmd_eval(void *data, const char *input) {
 		r_core_config_init (core);
 		//eprintf ("BUG: 'e-' command locks the eval hashtable. patches are welcome :)\n");
 		break;
-	case 'v': eprintf ("Invalid command '%s'. Use 'e?'\n", input); break;
 	case '*': r_config_list (core->config, NULL, 1); break;
 	case '?':
 		switch (input[1]) {
@@ -360,7 +365,7 @@ static int cmd_eval(void *data, const char *input) {
 			"Usage:", "e [var[=value]]", "Evaluable vars",
 			"e","?asm.bytes", "show description",
 			"e", "??", "list config vars with description",
-			"e", "", "list config vars",
+			"ej", "", "list config vars in JSON",
 			"e-", "", "reset config vars",
 			"e*", "", "dump config vars in r commands",
 			"e!", "a", "invert the boolean value of 'a' var",
@@ -368,8 +373,11 @@ static int cmd_eval(void *data, const char *input) {
 			"er", " [key]", "set config key as readonly. no way back",
 			"ec", " [k] [color]", "set color for given key (prompt, offset, ...)",
 			"et", " [key]", "show type of given config variable",
+			"ev", " [key]", "list config vars in verbose format",
+			"evj", " [key]", "list config vars in verbose format in JSON",
 			"e", " a", "get value of var 'a'",
 			"e", " a=b", "set var 'a' the 'b' value",
+			"e var=?", "", "print all valid values of var",
 			"env", " [k[=v]]", "get/set environment variable",
 			NULL};
 			r_core_cmd_help (core, help_msg);

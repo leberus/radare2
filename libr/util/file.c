@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2007-2016 - pancake */
+/* radare - LGPL - Copyright 2007-2017 - pancake */
 
 #include "r_types.h"
 #include "r_util.h"
@@ -12,7 +12,12 @@
 #if __UNIX__
 #include <sys/mman.h>
 #endif
-
+#if __APPLE__
+#include <copyfile.h>
+#endif
+#if _MSC_VER
+#include <process.h>
+#endif
 R_API bool r_file_truncate (const char *filename, ut64 newsize) {
 	int fd;
 	if (r_file_is_directory (filename)) {
@@ -29,7 +34,11 @@ R_API bool r_file_truncate (const char *filename, ut64 newsize) {
 	if (fd == -1) {
 		return false;
 	}
+#ifdef _MSC_VER
+        _chsize (fd, newsize);
+#else
 	ftruncate (fd, newsize);
+#endif
 	close (fd);
 	return true;
 }
@@ -88,9 +97,11 @@ R_API bool r_file_is_directory(const char *str) {
 	if (stat (str, &buf) == -1) {
 		return false;
 	}
+#ifdef S_IFBLK
 	if ((S_IFBLK & buf.st_mode) == S_IFBLK) {
 		return false;
 	}
+#endif
 	return (S_IFDIR == (S_IFDIR & buf.st_mode))? true: false;
 }
 
@@ -110,10 +121,20 @@ R_API bool r_file_exists(const char *str) {
 	if (!str || !*str) {
 		return false;
 	}
+#ifdef _MSC_VER
+	WIN32_FIND_DATAA FindFileData;
+	HANDLE handle = FindFirstFileA (str, &FindFileData);
+	int found = handle != INVALID_HANDLE_VALUE;
+	if (found) {
+		FindClose (handle);
+	}
+	return found > 0;
+#else
 	if (stat (str, &buf) == -1) {
 		return false;
 	}
 	return (S_ISREG (buf.st_mode))? true: false;
+#endif
 }
 
 R_API long r_file_proc_size(FILE *fd) {
@@ -247,7 +268,11 @@ R_API char *r_stdin_slurp (int *sz) {
 	}
 	return buf;
 #else
-	#warning TODO r_stdin_slurp
+#ifdef _MSC_VER
+#pragma message (" TODO r_stdin_slurp")
+#else
+#warning TODO r_stdin_slurp
+#endif
 	return NULL;
 #endif
 }
@@ -264,6 +289,7 @@ R_API char *r_file_slurp(const char *str, int *usz) {
 	if (!fd) {
 		return NULL;
 	}
+
 	(void)fseek (fd, 0, SEEK_END);
 	sz = ftell (fd);
 	if (!sz) {
@@ -403,7 +429,6 @@ R_API char *r_file_slurp_random_line_count(const char *file, int *line) {
 	int sz, i, lines, selection = -1;
 	struct timeval tv;
 	int start = *line;
-
 	if ((str = r_file_slurp (file, &sz))) {
 		gettimeofday (&tv, NULL);
 		srand (getpid() + tv.tv_usec);
@@ -487,8 +512,8 @@ R_API char *r_file_root(const char *root, const char *path) {
 	while (strstr (s, "//")) {
 		s = r_str_replace (s, "//", "", 1);
 	}
-	ret = r_str_concat (strdup (root), R_SYS_DIR);
-	ret = r_str_concat (ret, s);
+	ret = r_str_append (strdup (root), R_SYS_DIR);
+	ret = r_str_append (ret, s);
 	free (s);
 	return ret;
 }
@@ -558,13 +583,13 @@ R_API bool r_file_rm(const char *file) {
 	}
 	if (r_file_is_directory (file)) {
 #if __WINDOWS__
-		return !RemoveDirectory (file);
+		return !RemoveDirectoryA (file);
 #else
 		return !rmdir (file);
 #endif
 	} else {
 #if __WINDOWS__
-		return !DeleteFile (file);
+		return !DeleteFileA (file);
 #else
 		return !unlink (file);
 #endif
@@ -595,7 +620,7 @@ R_API int r_file_mmap_write(const char *file, ut64 addr, const ut8 *buf, int len
 	HANDLE fh;
 	DWORD written = 0;
 	if (r_sandbox_enable (0)) return -1;
-	fh = CreateFile (file, GENERIC_READ|GENERIC_WRITE,
+	fh = CreateFileA (file, GENERIC_READ|GENERIC_WRITE,
 		FILE_SHARE_READ | FILE_SHARE_WRITE,
 		NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	if (fh == INVALID_HANDLE_VALUE) {
@@ -640,12 +665,12 @@ R_API int r_file_mmap_read (const char *file, ut64 addr, ut8 *buf, int len) {
 	if (r_sandbox_enable (0)) {
 		return -1;
 	}
-	fh = CreateFile (file, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0);
+	fh = CreateFileA (file, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0);
 	if (fh == INVALID_HANDLE_VALUE) {
 		r_sys_perror ("CreateFile");
 		return -1;
 	}
-	fm = CreateFileMapping (fh, NULL, PAGE_READONLY, 0, 0, NULL);
+	fm = CreateFileMappingA (fh, NULL, PAGE_READONLY, 0, 0, NULL);
 	if (fm != INVALID_HANDLE_VALUE) {
 		ut8 *obuf = MapViewOfFile (fm, FILE_MAP_READ, 0, 0, len);
 		memcpy (obuf, buf, len);
@@ -693,7 +718,7 @@ static RMmap *r_file_mmap_unix (RMmap *m, int fd) {
 }
 #elif __WINDOWS__
 static RMmap *r_file_mmap_windows (RMmap *m, const char *file) {
-	m->fh = CreateFile (file, GENERIC_READ | (m->rw?GENERIC_WRITE:0),
+	m->fh = CreateFileA (file, GENERIC_READ | (m->rw?GENERIC_WRITE:0),
 		FILE_SHARE_READ|(m->rw?FILE_SHARE_WRITE:0), NULL,
 		OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	if (m->fh == INVALID_HANDLE_VALUE) {
@@ -701,7 +726,7 @@ static RMmap *r_file_mmap_windows (RMmap *m, const char *file) {
 		free (m);
 		return NULL;
 	}
-	m->fm = CreateFileMapping (m->fh, NULL, PAGE_READONLY, 0, 0, NULL);
+	m->fm = CreateFileMappingA (m->fh, NULL, PAGE_READONLY, 0, 0, NULL);
 		//m->rw?PAGE_READWRITE:PAGE_READONLY, 0, 0, NULL);
 	if (m->fm != INVALID_HANDLE_VALUE) {
 		m->buf = MapViewOfFile (m->fm, 
@@ -804,6 +829,9 @@ R_API char *r_file_temp (const char *prefix) {
 	int namesz;
 	char *name;
 	char *path = r_file_tmpdir ();
+	if (!prefix) {
+		prefix = "";
+	}
 	namesz = strlen (prefix) + strlen (path) + 32;
 	name = malloc (namesz);
 	snprintf (name, namesz, "%s/%s.%"PFMT64x, path, prefix, r_sys_now ());
@@ -817,7 +845,7 @@ R_API int r_file_mkstemp(const char *prefix, char **oname) {
 	char name[1024];
 #if __WINDOWS__
 	h = -1;
-	if (GetTempFileName (path, prefix, 0, name)) {
+	if (GetTempFileNameA (path, prefix, 0, name)) {
 		h = r_sandbox_open (name, O_RDWR|O_EXCL|O_BINARY, 0644);
 	}
 #else
@@ -861,7 +889,9 @@ R_API char *r_file_tmpdir() {
 R_API bool r_file_copy (const char *src, const char *dst) {
 	/* TODO: implement in C */
 	/* TODO: Use NO_CACHE for iOS dyldcache copying */
-#if __WINDOWS__
+#if __APPLE__
+	return copyfile (src, dst, 0, 0) != -1;
+#elif __WINDOWS__
 	return r_sys_cmdf ("copy %s %s", src, dst);
 #else
 	char *src2 = r_str_replace (strdup (src), "'", "\\'", 1);

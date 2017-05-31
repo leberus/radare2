@@ -48,6 +48,7 @@ R_API bool r_anal_op_fini(RAnalOp *op) {
 	op->src[2] = NULL;
 	r_anal_value_free (op->dst);
 	op->dst = NULL;
+	r_strbuf_fini (&op->opex);
 	r_strbuf_fini (&op->esil);
 	r_anal_switch_op_free (op->switch_op);
 	R_FREE (op->mnemonic);
@@ -95,6 +96,11 @@ R_API int r_anal_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, int le
 	}
 	memset (op, 0, sizeof (RAnalOp));
 	if (len > 0 && anal->cur && anal->cur->op) {
+		//use core binding to set asm.bits correctly based on the addr
+		//this is because of the hassle of arm/thumb
+		if (anal && anal->coreb.archbits) {
+			anal->coreb.archbits (anal->coreb.core, addr);
+		}
 		ret = anal->cur->op (anal, op, addr, data, len);
 		op->addr = addr;
 		/* consider at least 1 byte to be part of the opcode */
@@ -122,9 +128,11 @@ R_API int r_anal_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, int le
 	return ret;
 }
 
-R_API RAnalOp *r_anal_op_copy (RAnalOp *op) {
+R_API RAnalOp *r_anal_op_copy(RAnalOp *op) {
 	RAnalOp *nop = R_NEW0 (RAnalOp);
-	if (!nop) return NULL;
+	if (!nop) {
+		return NULL;
+	}
 	*nop = *op;
 	if (op->mnemonic) {
 		nop->mnemonic = strdup (op->mnemonic);
@@ -469,6 +477,7 @@ R_API const char *r_anal_op_family_to_string(int n) {
 	case R_ANAL_OP_FAMILY_CPU: return "cpu";
 	case R_ANAL_OP_FAMILY_FPU: return "fpu";
 	case R_ANAL_OP_FAMILY_MMX: return "mmx";
+	case R_ANAL_OP_FAMILY_SSE: return "sse";
 	case R_ANAL_OP_FAMILY_PRIV: return "priv";
 	case R_ANAL_OP_FAMILY_VIRT: return "virt";
 	default:
@@ -483,6 +492,7 @@ R_API int r_anal_op_family_from_string(const char *f) {
 	if (!strcmp (f, "cpu")) return R_ANAL_OP_FAMILY_CPU;
 	if (!strcmp (f, "fpu")) return R_ANAL_OP_FAMILY_FPU;
 	if (!strcmp (f, "mmx")) return R_ANAL_OP_FAMILY_MMX;
+	if (!strcmp (f, "sse")) return R_ANAL_OP_FAMILY_SSE;
 	if (!strcmp (f, "priv")) return R_ANAL_OP_FAMILY_PRIV;
 	if (!strcmp (f, "virt")) return R_ANAL_OP_FAMILY_VIRT;
 	return R_ANAL_OP_FAMILY_UNKNOWN;

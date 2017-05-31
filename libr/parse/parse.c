@@ -1,10 +1,10 @@
-/* radare2 - LGPL - Copyright 2009-2016 - nibble, pancake, maijin */
+/* radare2 - LGPL - Copyright 2009-2017 - nibble, pancake, maijin */
 
 #include <stdio.h>
 
 #include <r_types.h>
 #include <r_parse.h>
-#include "../config.h"
+#include <config.h>
 
 R_LIB_VERSION (r_parse);
 
@@ -25,6 +25,8 @@ R_API RParse *r_parse_new() {
 	p->parsers->free = NULL; // memleak
 	p->notin_flagspace = -1;
 	p->flagspace = -1;
+	p->relsub = false;
+	p->localvar_only = false;
 	for (i = 0; parse_static_plugins[i]; i++) {
 		r_parse_add (p, parse_static_plugins[i]);
 	}
@@ -137,9 +139,24 @@ static char *findNextNumber(char *op) {
 				bool is_space = ansi_found;
 				ansi_found = false;
 				if (!is_space) {
-					is_space = (p != op && (*o == ' ' || *o == ',' || *o == '['));
+					is_space = p == op;
+					if (!is_space && o) {
+						is_space = (*o == ' ' || *o == ',' || *o == '[');
+					}
 				}
-				if (is_space && *p >= '0' && *p <= '9') {
+				if (*p == '[') {
+					char *t = p;
+					p++;
+					if (!IS_DIGIT (*p)) {
+						for (;*t && *t != ']'; t++);
+						if (*t == ']') {
+							continue;
+						} else {
+							p = t;
+						}
+					}
+				}
+				if (is_space && IS_DIGIT (*p)) {
 					return p;
 				}
 				o = p++;
@@ -150,11 +167,12 @@ static char *findNextNumber(char *op) {
 }
 
 static int filter(RParse *p, RFlag *f, char *data, char *str, int len, bool big_endian) {
-	char *ptr = data, *ptr2;
+	char *ptr = data, *ptr2, *ptr_backup;
 	RAnalFunction *fcn;
 	RFlagItem *flag;
 	ut64 off;
 	bool x86 = false;
+	bool computed = false;
 	if (p && p->cur && p->cur->name) {
 		if (strstr (p->cur->name, "x86")) x86 = true;
 		if (strstr (p->cur->name, "m68k")) x86 = true;
@@ -167,14 +185,31 @@ static int filter(RParse *p, RFlag *f, char *data, char *str, int len, bool big_
 	if (ptr2) {
 		memmove (ptr2, ptr2 + 6, strlen (ptr2 + 6) + 1);
 	}
+	ptr2 = strstr (ptr, "qword ");
+	if (ptr2) {
+		memmove (ptr2, ptr2 + 6, strlen (ptr2 + 6) + 1);
+	}
 #endif
 	ptr2 = NULL;
 	// remove "dword" 2
-	while ((ptr = findNextNumber (ptr))) {
+	char *nptr;
+	while ((nptr = findNextNumber (ptr))) {
+#if 0
+		char *optr = ptr;
+		if (nptr[1]== ' ') {
+			for (nptr++;*nptr && *nptr >='0' && *nptr <= '9'; nptr++) {
+			}
+			ptr = nptr;
+			continue;
+		}
+#endif
+		ptr = nptr;
 		if (x86) {
-			for (ptr2 = ptr; *ptr2 && !isx86separator (*ptr2); ptr2++);
+			for (ptr2 = ptr; *ptr2 && !isx86separator (*ptr2); ptr2++) {
+		//		eprintf ("(%s) (%c)\n", optr, *ptr2);
+			}
 		} else {
-			for (ptr2 = ptr; *ptr2 && (*ptr2 != ']' && (*ptr2 != '\x1b') && !isseparator (*ptr2)); ptr2++);
+			for (ptr2 = ptr; *ptr2 && (*ptr2 != ']' && (*ptr2 != '\x1b') && !ISSEPARATOR (*ptr2)); ptr2++);
 		}
 		off = r_num_math (NULL, ptr);
 		if (off > 0xff) {
@@ -191,10 +226,23 @@ static int filter(RParse *p, RFlag *f, char *data, char *str, int len, bool big_
 				return true;
 			}
 			if (f) {
+				RFlagItem *flag2;
 				flag = r_flag_get_i2 (f, off);
+				computed = false;
 				if (!flag) {
 					flag = r_flag_get_i (f, off);
 				}
+				if (!flag && p->relsub_addr) {
+					computed = true;
+					flag2 = r_flag_get_i2 (f, p->relsub_addr);
+					if (!flag2) {
+						flag2 = r_flag_get_i (f, p->relsub_addr);
+					}
+					if (!flag) {
+						flag = flag2;
+					}
+				}
+
 				if (isvalidflag (flag)) {
 					if (p->notin_flagspace != -1) {
 						if (p->flagspace == flag->space) {
@@ -204,22 +252,82 @@ static int filter(RParse *p, RFlag *f, char *data, char *str, int len, bool big_
 						ptr = ptr2;
 						continue;
 					}
-					*ptr = 0;
 					// hack to realign pointer for colours
 					ptr2--;
 					if (*ptr2 != 0x1b) {
 						ptr2++;
 					}
+					ptr_backup = ptr;
+					if (computed && ptr != ptr2 && *ptr) {
+						if (*ptr2 == ']') {
+							ptr2++;
+							for (ptr--; ptr > data && *ptr != '['; ptr--);
+							if (ptr == data) {
+								ptr = ptr_backup;
+							}
+						}
+					}
+					*ptr = 0;
 					snprintf (str, len, "%s%s%s", data, flag->name,
 							(ptr != ptr2) ? ptr2 : "");
+					bool banned = false;
+					{
+						const char *p = strchr (str, '[');
+						const char *a = strchr (str, '+');
+						const char *m = strchr (str, '*');
+						if (p && (a || m)) {
+							banned = true;
+						}
+					}
+					if (p->relsub_addr && !banned) { // && strstr (str, " + ")) {
+						int flag_len = strlen (flag->name);
+						char *ptr_end = str + strlen (data) + flag_len - 1;
+						char *ptr_right = ptr_end + 1, *ptr_left, *ptr_esc;
+						bool ansi_found = false;
+						int copied_len;
+						while (*ptr_right) {
+							if (*ptr_right == 0x1b) {
+								while (*ptr_right && *ptr_right != 'm') ptr_right++;
+								if (*ptr_right) {
+									ptr_right++;
+								}
+								ansi_found = true;
+								continue;
+							}
+							if (*ptr_right == ']') {
+								ptr_left = ptr_esc = ptr_end - flag_len;
+								while (ptr_left >= str) {
+									if (*ptr_left == '[' &&
+									(ptr_left == str || *(ptr_left - 1) != 0x1b)) {
+										break;
+									}
+									ptr_left--;
+								}
+								if (ptr_left < str) {
+									break;
+								}
+								for (; ptr_esc >= str && *ptr_esc != 0x1b; ptr_esc--);
+								if (ptr_esc < str) {
+									ptr_esc = ptr_end - flag_len + 1;
+								}
+								copied_len = ptr_end - ptr_esc + 1;
+								memmove (ptr_left, ptr_esc, copied_len);
+								sprintf (ptr_left + copied_len, "%s%s",
+									 ansi_found && ptr_right - ptr_end + 1 >= 4 ? "\x1b[0m" : "",
+									 ptr_right + 1);
+							}
+							break;
+						}
+					}
 					return true;
 				}
 			}
 		}
 		if (p->hint) {
 			int pnumleft, immbase = p->hint->immbase;
-			char num[256], *pnum;
+			char num[256], *pnum, *tmp;
 			bool is_hex = false;
+			int tmp_count;
 			strncpy (num, ptr, sizeof (num)-2);
 			pnum = num;
 			if (!strncmp (pnum, "0x", 2)) {
@@ -227,7 +335,7 @@ static int filter(RParse *p, RFlag *f, char *data, char *str, int len, bool big_
 				pnum += 2;
 			}
 			for (; *pnum; pnum++) {
-				if ((is_hex && ishexchar(*pnum)) || IS_NUMBER(*pnum)) {
+				if ((is_hex && ISHEXCHAR (*pnum)) || IS_DIGIT (*pnum)) {
 					continue;
 				}
 				break;
@@ -242,6 +350,23 @@ static int filter(RParse *p, RFlag *f, char *data, char *str, int len, bool big_
 				strcat (num, "b");
 				break;
 			case 2: // hack for ascii
+				tmp_count = 0;
+				for (tmp = data; tmp < ptr; tmp++) {
+					if (*tmp == 0x1b) {
+						while (tmp < ptr - 1 && *tmp != 'm') {
+							tmp++;
+						}
+						continue;
+					} else if (*tmp == '[') {
+						tmp_count++;
+					} else if (*tmp == ']') {
+						tmp_count--;
+					}
+				}
+				if (tmp_count > 0) {
+					ptr = ptr2;
+					continue;
+				}
 				memset (num, 0, sizeof (num));
 				pnum = num;
 				*pnum++ = '\'';

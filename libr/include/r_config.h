@@ -21,7 +21,6 @@ typedef int (*RConfigCallback)(void *user, void *data);
 
 typedef struct r_config_node_t {
 	char *name;
-	ut32 hash;
 	int flags;
 	char *value;
 	ut64 i_value;
@@ -31,6 +30,7 @@ typedef struct r_config_node_t {
 	RConfigCallback getter;
 	RConfigCallback setter;
 	char *desc;
+	RList *options;
 } RConfigNode;
 
 R_API const char *r_config_node_type(RConfigNode *node);
@@ -43,7 +43,7 @@ typedef struct r_config_t {
 	RNum *num;
 	PrintfCallback cb_printf;
 	RList *nodes;
-	RHashTable *ht;
+	SdbHash *ht;
 } RConfig;
 
 typedef struct r_config_hold_num_t {

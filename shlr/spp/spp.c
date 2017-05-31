@@ -1,4 +1,4 @@
-/* MIT (C) pancake (at) nopcode (dot) org - 2009-2016 */
+/* MIT (C) pancake (at) nopcode (dot) org - 2009-2017 */
 
 #include "spp.h"
 #include "config.h"
@@ -23,7 +23,8 @@ int spp_run(char *buf, Output *out) {
 	D fprintf (stderr, "SPP_RUN(%s)\n", buf);
 	if (proc->chop) {
 		for (; IS_SPACE (*buf); buf++);
-		for (tok = buf + strlen(buf) - 1; IS_SPACE (*tok); tok--) {
+		int buflen = strlen (buf);
+		for (tok = buf + (buflen? buflen - 1: 0); IS_SPACE (*tok); tok--) {
 			*tok = '\0';
 		}
 	}
@@ -216,7 +217,7 @@ retry:
 				if (buf[0] == '\n' && printed) {
 					buf++;
 				}
-				D printf (" ==> 2.1: continue(%s)\n", ptr2 + delta);
+				D printf (" ==> 2.1: continue(%s)\n", buf);
 				goto retry;
 			} else {
 				do_fputs (out, "\n");

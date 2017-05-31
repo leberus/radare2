@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2016 - pancake */
+/* radare - LGPL - Copyright 2009-2017 - pancake */
 
 #include <r_types.h>
 #include <r_util.h>
@@ -9,28 +9,24 @@
 
 extern RBinWrite r_bin_write_mach0;
 
-static int check(RBinFile *arch);
-static int check_bytes(const ut8 *buf, ut64 length);
 static RBinInfo* info(RBinFile *arch);
 
-static Sdb* get_sdb (RBinObject *o) {
+static Sdb* get_sdb (RBinFile *bf) {
+	RBinObject *o = bf->o;
 	if (!o) {
 		return NULL;
 	}
 	struct MACH0_(obj_t) *bin = (struct MACH0_(obj_t) *) o->bin_obj;
-	if (bin && bin->kv) {
-		return bin->kv;
-	}
-	return NULL;
+	return bin? bin->kv: NULL;
 }
 
-static char *entitlements(RBinFile *arch) {
+static char *entitlements(RBinFile *arch, bool json) {
 	struct MACH0_(obj_t) *bin;
-	if (!arch || !arch->o) {
+	if (!arch || !arch->o || json) {
 		return NULL;
 	}
 	bin = arch->o->bin_obj;
-	return (char *)bin->signature;
+	return strdup ((char*) bin->signature);
 }
 
 static void * load_bytes(RBinFile *arch, const ut8 *buf, ut64 sz, ut64 loadaddr, Sdb *sdb){
@@ -49,7 +45,7 @@ static void * load_bytes(RBinFile *arch, const ut8 *buf, ut64 sz, ut64 loadaddr,
 	return res;
 }
 
-static int load(RBinFile *arch) {
+static bool load(RBinFile *arch) {
 	void *res;
 	const ut8 *bytes = arch ? r_buf_buffer (arch->buf) : NULL;
 	ut64 sz = arch ? r_buf_size (arch->buf): 0;
@@ -171,6 +167,19 @@ static RList* sections(RBinFile *arch) {
 	return ret;
 }
 
+static void _handle_arm_thumb(struct MACH0_(obj_t) *bin, RBinSymbol **p) {
+	RBinSymbol *ptr = *p;
+	ptr->bits = 32;
+	if (bin) {
+		if (ptr->paddr & 1) {
+			ptr->paddr--;
+			ptr->vaddr--;
+			ptr->bits = 16;
+		}
+	}
+
+}
+
 static RList* symbols(RBinFile *arch) {
 	struct MACH0_(obj_t) *bin;
 	int i;
@@ -179,7 +188,7 @@ static RList* symbols(RBinFile *arch) {
 	RBinObject *obj = arch ? arch->o : NULL;
 	RList *ret = r_list_newf (free);
 	const char *lang = "c";
-	int wordsize = 16;
+	int wordsize = 0;
 	if (!ret) {
 		return NULL;
 	}
@@ -187,11 +196,12 @@ static RList* symbols(RBinFile *arch) {
 		free (ret);
 		return NULL;
 	}
+	bool isStripped = false;
 	wordsize = MACH0_(get_bits) (obj->bin_obj);
-
 	if (!(symbols = MACH0_(get_symbols) (obj->bin_obj))) {
 		return ret;
 	}
+	Sdb *symcache = sdb_new0 ();
 	bin = (struct MACH0_(obj_t) *) obj->bin_obj;
 	for (i = 0; !symbols[i].last; i++) {
 		if (!symbols[i].name[0] || symbols[i].addr < 100) {
@@ -201,22 +211,38 @@ static RList* symbols(RBinFile *arch) {
 			break;
 		}
 		ptr->name = strdup ((char*)symbols[i].name);
+		if (ptr->name[0] == '_' && strncmp (ptr->name, "imp.", 4)) {
+			char *dn = r_bin_demangle (arch, ptr->name, ptr->name, ptr->vaddr);
+			if (dn) {
+				ptr->dname = dn;
+				char *p = strchr (dn, '.');
+				if (p) {
+					if (IS_UPPER (ptr->name[0])) {
+						ptr->classname = strdup (ptr->name);
+						ptr->classname[p - ptr->name] = 0;
+					} else if (IS_UPPER (p[1])) {
+						ptr->classname = strdup (p + 1);
+						p = strchr (ptr->classname, '.');
+						if (p) {
+							*p = 0;
+						}
+					}
+				}
+			}
+		}
 		ptr->forwarder = r_str_const ("NONE");
 		ptr->bind = r_str_const ((symbols[i].type == R_BIN_MACH0_SYMBOL_TYPE_LOCAL)?
-			"LOCAL": "GLOBAL");
+				"LOCAL": "GLOBAL");
 		ptr->type = r_str_const ("FUNC");
 		ptr->vaddr = symbols[i].addr;
 		ptr->paddr = symbols[i].offset + obj->boffset;
 		ptr->size = symbols[i].size;
-		ptr->bits = wordsize;
-		if (wordsize == 16) {
-			// if thumb, hint non-thumb symbols
-			if (!(ptr->paddr & 1)) {
-				ptr->bits = 32;
-			}
+		if (bin->hdr.cputype == CPU_TYPE_ARM && wordsize < 64) {
+			_handle_arm_thumb (bin, &ptr);
 		}
 		ptr->ordinal = i;
 		bin->dbg_info = strncmp (ptr->name, "radr://", 7)? 0: 1;
+		sdb_set (symcache, sdb_fmt (0, "sym0x%llx", ptr->vaddr), "found", 0);
 		if (!strncmp (ptr->name, "type.", 5)) {
 			lang = "go";
 		}
@@ -242,12 +268,25 @@ static RList* symbols(RBinFile *arch) {
 			ptr->forwarder = r_str_const ("NONE");
 			ptr->bind = r_str_const ("LOCAL");
 			ptr->ordinal = i++;
+			if (bin->hdr.cputype == CPU_TYPE_ARM && wordsize < 64) {
+				_handle_arm_thumb (bin, &ptr);
+			}
 			r_list_append (ret, ptr);
+			// if any func is not found in symbols then we can consider it is stripped
+			if (!isStripped) {
+				if (!sdb_const_get (symcache, sdb_fmt (0, "sym0x%llx", ptr->vaddr), 0)) {
+					isStripped = true;
+				}
+			}
+
 		}
 	}
 	bin->lang = lang;
+	if (isStripped) {
+		bin->dbg_info |= R_BIN_DBG_STRIPPED;
+	}
 	free (symbols);
-
+	sdb_free (symcache);
 	return ret;
 }
 
@@ -407,17 +446,12 @@ static RBinInfo* info(RBinFile *arch) {
 	}
 	ret->has_va = true;
 	ret->has_pi = MACH0_(is_pie) (arch->o->bin_obj);
+	ret->has_nx = MACH0_(has_nx) (arch->o->bin_obj);
 	return ret;
 }
 
 #if !R_BIN_MACH064
-static int check(RBinFile *arch) {
-	const ut8 *bytes = arch ? r_buf_buffer (arch->buf) : NULL;
-	ut64 sz = arch ? r_buf_size (arch->buf): 0;
-	return check_bytes (bytes, sz);
-}
-
-static int check_bytes(const ut8 *buf, ut64 length) {
+static bool check_bytes(const ut8 *buf, ut64 length) {
 	if (buf && length >= 4) {
 		if (!memcmp (buf, "\xce\xfa\xed\xfe", 4) ||
 			!memcmp (buf, "\xfe\xed\xfa\xce", 4))
@@ -732,9 +766,8 @@ static ut64 size(RBinFile *arch) {
 			}
 		}
 	}
-	return off+len;
+	return off + len;
 }
-
 
 RBinPlugin r_bin_plugin_mach0 = {
 	.name = "mach0",
@@ -744,7 +777,6 @@ RBinPlugin r_bin_plugin_mach0 = {
 	.load = &load,
 	.load_bytes = &load_bytes,
 	.destroy = &destroy,
-	.check = &check,
 	.check_bytes = &check_bytes,
 	.baddr = &baddr,
 	.binsym = &binsym,
@@ -755,6 +787,8 @@ RBinPlugin r_bin_plugin_mach0 = {
 	.imports = &imports,
 	.size = &size,
 	.info = &info,
+	.header = MACH0_(mach_headerfields),
+	.fields = MACH0_(mach_fields),
 	.libs = &libs,
 	.relocs = &relocs,
 	.create = &create,

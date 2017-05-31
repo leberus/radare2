@@ -120,12 +120,28 @@ R_API RList *r_anal_xrefs_get (RAnal *anal, ut64 to) {
 	if (!list) {
 		return NULL;
 	}
-	list->free = NULL; // XXX
 	r_anal_xrefs_from (anal, list, "xref", R_ANAL_REF_TYPE_NULL, to);
 	r_anal_xrefs_from (anal, list, "xref", R_ANAL_REF_TYPE_CODE, to);
 	r_anal_xrefs_from (anal, list, "xref", R_ANAL_REF_TYPE_CALL, to);
 	r_anal_xrefs_from (anal, list, "xref", R_ANAL_REF_TYPE_DATA, to);
 	r_anal_xrefs_from (anal, list, "xref", R_ANAL_REF_TYPE_STRING, to);
+	if (r_list_empty (list)) {
+		r_list_free (list);
+		list = NULL;
+	}
+	return list;
+}
+
+R_API RList *r_anal_refs_get (RAnal *anal, ut64 from) {
+	RList *list = r_list_new ();
+	if (!list) {
+		return NULL;
+	}
+	r_anal_xrefs_from (anal, list, "ref", R_ANAL_REF_TYPE_NULL, from);
+	r_anal_xrefs_from (anal, list, "ref", R_ANAL_REF_TYPE_CODE, from);
+	r_anal_xrefs_from (anal, list, "ref", R_ANAL_REF_TYPE_CALL, from);
+	r_anal_xrefs_from (anal, list, "ref", R_ANAL_REF_TYPE_DATA, from);
+	r_anal_xrefs_from (anal, list, "ref", R_ANAL_REF_TYPE_STRING, from);
 	if (r_list_empty (list)) {
 		r_list_free (list);
 		list = NULL;
@@ -215,7 +231,7 @@ R_API void r_anal_xrefs_list(RAnal *anal, int rad) {
 		anal->cb_printf ("}\n");
 		}
 		break;
-	default: 
+	default:
 		sdb_foreach (DB, (SdbForeachCallback)xrefs_list_cb_plain, anal);
 		break;
 	}

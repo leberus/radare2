@@ -62,7 +62,12 @@ R_API char *r_num_units(char *buf, ut64 num) {
 	char unit;
 	int tnum;
 	double fnum = num;
-	if (!buf) buf = malloc (32);
+	if (!buf) {
+		buf = malloc (32);
+		if (!buf) {
+			return NULL;
+		}
+	}
 	//if (num>=TB) { unit = 'T'; fnum = num/TB; } else
 	if (num>=GB) { unit = 'G'; fnum = fnum/GB; } else
 	if (num>=MB) { unit = 'M'; fnum = fnum/MB; } else
@@ -107,36 +112,46 @@ R_API ut64 r_num_get(RNum *num, const char *str) {
 	if (num && num->callback) {
 		ok = 0;
 		ret = num->callback (num->userptr, str, &ok);
-		if (ok) return ret;
+		if (ok) {
+			return ret;
+		}
 	}
 
-	if (str[0] && str[1] && str[2])
-		if (str[0]=='\'' && str[2]=='\'')
+	if (str[0] && str[1] && str[2]) {
+		if (str[0]=='\'' && str[2]=='\'') {
 			return (ut64)str[1];
+		}
+	}
 
 	len = strlen (str);
-	if (len>3 && str[4] == ':') {
-		if (sscanf (str, "%04x", &s)==1)
-			if (sscanf (str+5, "%04x", &a)==1)
+	if (len > 3 && str[4] == ':') {
+		if (sscanf (str, "%04x", &s) == 1) {
+			if (sscanf (str+5, "%04x", &a)==1) {
 				return (ut64) ((s<<4) + a);
+			}
+		}
 	} else if (len>6 && str[6] == ':') {
-		if (sscanf (str, "0x%04x:0x%04x", &s, &a) == 2)
-			return (ut64) ((s<<4) + a);
-		if (sscanf (str, "0x%04x:%04x", &s, &a) == 2)
-			return (ut64) ((s<<4) + a);
+		if (sscanf (str, "0x%04x:0x%04x", &s, &a) == 2) {
+			return (ut64) ((s << 4) + a);
+		}
+		if (sscanf (str, "0x%04x:%04x", &s, &a) == 2) {
+			return (ut64) ((s << 4) + a);
+		}
 	}
-	if (str[0]=='0' && str[1]=='b') {
+	if (str[0] == '0' && str[1] == 'b') {
 		ret = 0;
-		for (j=0, i=strlen (str)-1; i>0; i--, j++) {
-			if (str[i]=='1') ret|=1<<j;
-			else if (str[i]!='0') break;
+		for (j = 0, i = strlen (str) - 1; i > 0; i--, j++) { 
+			if (str[i] == '1') {
+				ret|=1 << j; 
+			} else if (str[i] != '0') {
+				break;
+			}
 		}
 		sscanf (str, "0x%"PFMT64x, &ret);
-	} else
-	if (str[0]=='\'') {
+	} else if (str[0] == '\'') {
 		ret = str[1] & 0xff;
 	} else
-	if (str[0]=='0' && str[1]=='x') {
+	if (str[0] == '0' && str[1] == 'x') {
 #if 0
 // 32bit chop
 #if __WINDOWS__ && MINGW32 && !__CYGWIN__
@@ -146,9 +161,10 @@ R_API ut64 r_num_get(RNum *num, const char *str) {
 		ret = strtoull (str + 2, NULL, 16);
 		//sscanf (str+2, "%"PFMT64x, &ret);
 	} else {
-		lch = str[len>0?len-1:0];
-		if (*str=='0' && lch != 'b' && lch != 'h')
+		lch = str[len > 0? len - 1:0];
+		if (*str == '0' && lch != 'b' && lch != 'h') {
 			lch = 'o';
+		}
 		switch (lch) {
 		case 'h': // hexa
 			sscanf (str, "%"PFMT64x, &ret);
@@ -158,22 +174,44 @@ R_API ut64 r_num_get(RNum *num, const char *str) {
 			break;
 		case 'b': // binary
 			ret = 0;
-			for (j=0, i=strlen (str)-2; i>=0; i--, j++) {
-				if (str[i]=='1') ret|=1<<j;
-				else if (str[i]!='0') break;
+			for (j = 0, i = strlen (str) - 2; i >= 0; i--, j++) {
+				if (str[i] == '1') {
+					ret|=1 << j;
+				} else if (str[i] != '0') {
+					break;
+				}
 			}
 			break;
 		case 'K': case 'k':
-			sscanf (str, "%"PFMT64d, &ret);
-			ret *= 1024;
+			if (strchr (str, '.')) {
+				double d = 0;
+				sscanf (str, "%lf", &d);
+				ret = (ut64)(d * KB);
+			} else {
+				ret = 0LL;
+				sscanf (str, "%"PFMT64d, &ret);
+				ret *= KB;
+			}
 			break;
 		case 'M': case 'm':
-			sscanf (str, "%"PFMT64d, &ret);
-			ret *= 1024*1024;
+			if (strchr (str, '.')) {
+				double d = 0;
+				sscanf (str, "%lf", &d);
+				ret = (ut64)(d * MB);
+			} else {
+				sscanf (str, "%"PFMT64d, &ret);
+				ret *= MB;
+			}
 			break;
 		case 'G': case 'g':
-			sscanf (str, "%"PFMT64d, &ret);
-			ret *= 1024*1024*1024;
+			if (strchr (str, '.')) {
+				double d = 0;
+				sscanf (str, "%lf", &d);
+				ret = (ut64)(d * GB);
+			} else {
+				sscanf (str, "%"PFMT64d, &ret);
+				ret *= GB;
+			}
 			break;
 		default:
 #if 0
@@ -187,7 +225,9 @@ R_API ut64 r_num_get(RNum *num, const char *str) {
 			break;
 		}
 	}
-	if (num) num->value = ret;
+	if (num) {
+		num->value = ret;
+	}
 	return ret;
 }
 
@@ -240,9 +280,14 @@ R_API ut64 r_num_math(RNum *num, const char *str) {
 		num->dbz = 0;
 	}
 	ret = r_num_calc (num, str, &err);
-	if (err) eprintf ("r_num_calc error: (%s) in (%s)\n", err, str);
-	else if (num) num->value = ret;
-	if (num) num->value = ret;
+	if (err) {
+		eprintf ("r_num_calc error: (%s) in (%s)\n", err, str);
+	} else if (num) {
+		num->value = ret;
+	}
+	if (num) {
+		num->value = ret;
+	}
 	return ret;
 #else
 	ut64 ret = 0LL;
@@ -307,7 +352,7 @@ R_API ut64 r_num_math(RNum *num, const char *str) {
 }
 
 R_API int r_num_is_float(RNum *num, const char *str) {
-	return (IS_NUMBER (*str) && (strchr (str, '.') || str[strlen (str) - 1] == 'f'));
+	return (IS_DIGIT (*str) && (strchr (str, '.') || str[strlen (str) - 1] == 'f'));
 }
 
 R_API double r_num_get_float(RNum *num, const char *str) {
@@ -402,7 +447,7 @@ R_API int r_num_conditional(RNum *num, const char *str) {
 				lgt = strchr (p, '=');
 				if (lgt && lgt > p) {
 					lgt--;
-					if (*lgt=='!') {
+					if (*lgt == '!') {
 						r_str_replace_char (p, '!', ' ');
 						r_str_replace_char (p, '=', '-');
 						n = r_num_math (num, p);
@@ -505,7 +550,7 @@ R_API ut64 r_num_tail(RNum *num, ut64 addr, const char *hex) {
 	if (p) {
 		strcpy (p, "0x");
 		strcpy (p+2, hex);
-		if (hex[0] >= '0' && hex[0] <= '9') {
+		if (IS_DIGIT(hex[0])) {
 			n = r_num_math (num, p);
 		} else {
 			eprintf ("Invalid argument\n");

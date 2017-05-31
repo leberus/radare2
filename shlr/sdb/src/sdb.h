@@ -25,6 +25,10 @@ extern "C" {
 #define SDB_MIN_KEY 1
 #define SDB_MAX_KEY 0xff
 
+#if !defined(SZT_ADD_OVFCHK)
+#define SZT_ADD_OVFCHK(x, y) ((SIZE_MAX - (x)) <= (y))
+#endif
+
 #if __SDB_WINDOWS__ && !__CYGWIN__
 #include <windows.h>
 #include <fcntl.h>
@@ -32,8 +36,17 @@ extern "C" {
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <io.h>
-extern void *__cdecl _aligned_malloc(size_t, size_t);
+#ifndef _MSC_VER
+extern __attribute__((dllimport)) void *__cdecl _aligned_malloc(size_t, size_t);
 extern char *strdup (const char *);
+#else
+#include <process.h>
+#include <windows.h>
+#include <malloc.h> // for _aligned_malloc
+#define ftruncate _chsize
+#endif
+#undef r_offsetof
+#define r_offsetof(type, member) ((unsigned long) (ut64)&((type*)0)->member)
 //#define SDB_MODE 0
 #define SDB_MODE _S_IWRITE | _S_IREAD
 #else
@@ -86,6 +99,7 @@ typedef struct sdb_t {
 	SdbList *hooks;
 	SdbKv tmpkv;
 	ut32 depth;
+	bool timestamped;
 } Sdb;
 
 typedef struct sdb_ns_t {
@@ -94,7 +108,7 @@ typedef struct sdb_ns_t {
 	Sdb *sdb;
 } SdbNs;
 
-SDB_API Sdb* sdb_new0();
+SDB_API Sdb* sdb_new0(void);
 SDB_API Sdb* sdb_new(const char *path, const char *file, int lock);
 
 SDB_API int sdb_open(Sdb *s, const char *file);
@@ -211,7 +225,7 @@ SDB_API int sdb_json_num_set(Sdb* s, const char *k, const char *p, int v, ut32 c
 SDB_API int sdb_json_num_dec(Sdb* s, const char *k, const char *p, int n, ut32 cas);
 SDB_API int sdb_json_num_inc(Sdb* s, const char *k, const char *p, int n, ut32 cas);
 
-char *sdb_json_indent(const char *s);
+char *sdb_json_indent(const char *s, const char *tab);
 char *sdb_json_unindent(const char *s);
 
 typedef struct {

@@ -1,11 +1,13 @@
 -include config-user.mk
 include global.mk
 
-PREVIOUS_RELEASE=1.0.2
+PREVIOUS_RELEASE=1.5.0
 
+MESON?=meson
 R2R=radare2-regressions
 R2R_URL=$(shell doc/repo REGRESSIONS)
-R2BINS=$(shell cd binr ; echo r*2 r2agent r2pm)
+R2BINS=$(shell cd binr ; echo r*2 r2agent r2pm r2-indent)
+BUILDSEC=$(shell date "+__%H:%M:%S")
 DATADIRS=libr/cons/d libr/bin/d libr/asm/d libr/syscall/d libr/magic/d libr/anal/d
 USE_ZIP=YES
 ZIP=zip
@@ -52,7 +54,7 @@ all: plugins.cfg libr/include/r_version.h
 	${MAKE} -C libr
 	${MAKE} -C binr
 
-.PHONY: libr/include/r_version.h
+#.PHONY: libr/include/r_version.h
 GIT_TAP=$(shell git describe --tags --match "[0-9]*" 2>/dev/null || echo $(VERSION))
 GIT_TIP=$(shell git rev-parse HEAD 2>/dev/null || echo HEAD)
 ifndef SOURCE_DATE_EPOCH
@@ -68,15 +70,15 @@ libr/include/r_version.h:
 	@echo $(Q)#define R2_VERSION_COMMIT $(R2VC)$(Q) >> $@.tmp
 	@echo $(Q)#define R2_GITTAP $(ESC)"$(GIT_TAP)$(ESC)"$(Q) >> $@.tmp
 	@echo $(Q)#define R2_GITTIP $(ESC)"$(GIT_TIP)$(ESC)"$(Q) >> $@.tmp
-	@echo $(Q)#define R2_BIRTH $(ESC)"$(GIT_NOW)$(ESC)"$(Q) >> $@.tmp
+	@echo $(Q)#define R2_BIRTH $(ESC)"$(GIT_NOW)$(BUILDSEC)$(ESC)"$(Q) >> $@.tmp
 	@echo $(Q)#endif$(Q) >> $@.tmp
-	@cmp -s $@.tmp $@ || (mv -f $@.tmp $@ && echo "Update libr/include/r_version.h")
+	@mv -f $@.tmp $@
 	@rm -f $@.tmp
 
 plugins.cfg:
 	@if [ ! -e config-user.mk ]; then echo ; \
 	echo "  Please, run ./configure first" ; echo ; exit 1 ; fi
-	sh configure-plugins
+	$(SHELL) ./configure-plugins
 
 w32:
 	sys/mingw32.sh
@@ -95,6 +97,7 @@ w64dist:
 	${MAKE} windist WINBITS=w64
 
 WINDIST=${WINBITS}dist
+ZIPNAME?=radare2-${WINBITS}-${VERSION}.zip
 
 C=$(shell printf "\033[32m")
 R=$(shell printf "\033[0m")
@@ -149,18 +152,20 @@ windist:
 	@mv "${WINDIST}" "radare2-${WINBITS}-${VERSION}"
 	@rm -f "radare2-${WINBITS}-${VERSION}.zip"
 ifneq ($(USE_ZIP),NO)
-	$(ZIP) -r "radare2-${WINBITS}-${VERSION}.zip" "radare2-${WINBITS}-${VERSION}"
+	$(ZIP) -r "${ZIPNAME}" "radare2-${WINBITS}-${VERSION}"
 endif
 
 clean: rmd
+	rm -f libr/libr.a
 	for DIR in shlr libr binr ; do (cd "$$DIR" ; ${MAKE} clean) ; done
 
 distclean mrproper:
 	-rm -f `find . -type f -name '*.d'`
 	rm -f `find . -type f -name '*.o'`
+	rm -f libr/libr.a
 	for DIR in libr binr shlr ; do ( cd "$$DIR" ; ${MAKE} mrproper) ; done
 	rm -f config-user.mk plugins.cfg libr/config.h
-	rm -f libr/include/r_userconf.h libr/config.mk
+	rm -f libr/include/r_userconf.h libr/include/r_version.h libr/config.mk
 	rm -f pkgcfg/*.pc
 
 pkgcfg:
@@ -183,13 +188,13 @@ install-man-symlink:
 		ln -fs "${PWD}/man/$$FILE" "${DESTDIR}${MANDIR}/man7/$$FILE" ; done
 
 install-doc:
-	${INSTALL_DIR} "${DESTDIR}${DATADIR}/doc/radare2"
-	for FILE in doc/* ; do ${INSTALL_DATA} $$FILE "${DESTDIR}${DATADIR}/doc/radare2" ; done
+	${INSTALL_DIR} "${DESTDIR}${DOCDIR}"
+	for FILE in doc/* ; do ${INSTALL_DATA} $$FILE "${DESTDIR}${DOCDIR}" ; done
 
 install-doc-symlink:
-	${INSTALL_DIR} "${DESTDIR}${DATADIR}/doc/radare2"
+	${INSTALL_DIR} "${DESTDIR}${DOCDIR}"
 	cd doc ; for FILE in * ; do \
-		ln -fs "${PWD}/doc/$$FILE" "${DESTDIR}${DATADIR}/doc/radare2" ; done
+		ln -fs "${PWD}/doc/$$FILE" "${DESTDIR}${DOCDIR}" ; done
 
 install love: install-doc install-man install-www
 	cd libr && ${MAKE} install PARENT=1
@@ -204,10 +209,13 @@ install love: install-doc install-man install-www
 		rm -f last ; ln -fs $(VERSION) last
 	rm -rf "${DESTDIR}${DATADIR}/radare2/${VERSION}/hud"
 	mkdir -p "${DESTDIR}${DATADIR}/radare2/${VERSION}/hud"
+	mkdir -p "${DESTDIR}${BINDIR}"
+	ln -fs "${PWD}/sys/indent.sh" "${DESTDIR}${BINDIR}/r2-indent"
+	ln -fs "${PWD}/sys/r2-docker.sh" "${DESTDIR}${BINDIR}/r2-docker"
 	cp -f doc/hud "${DESTDIR}${DATADIR}/radare2/${VERSION}/hud/main"
 	mkdir -p "${DESTDIR}${DATADIR}/radare2/${VERSION}/"
-	sys/ldconfig.sh
-	./configure-plugins --rm-static $(DESTDIR)/$(LIBDIR)/radare2/last/
+	$(SHELL) sys/ldconfig.sh
+	$(SHELL) ./configure-plugins --rm-static $(DESTDIR)/$(LIBDIR)/radare2/last/
 
 # Remove make .d files. fixes build when .c files are removed
 rmd:
@@ -243,6 +251,9 @@ symstall install-symlink: install-man-symlink install-doc-symlink install-pkgcon
 		echo "$$DIR" ; \
 		${MAKE} install-symlink ); \
 	done
+	mkdir -p "${DESTDIR}${BINDIR}"
+	ln -fs "${PWD}/sys/indent.sh" "${DESTDIR}${BINDIR}/r2-indent"
+	ln -fs "${PWD}/sys/r2-docker.sh" "${DESTDIR}${BINDIR}/r2-docker"
 	mkdir -p "${DESTDIR}${DATADIR}/radare2/${VERSION}/hud"
 	cd "$(DESTDIR)$(LIBDIR)/radare2/" ;\
 		rm -f last ; ln -fs $(VERSION) last
@@ -250,10 +261,12 @@ symstall install-symlink: install-man-symlink install-doc-symlink install-pkgcon
 		rm -f last ; ln -fs $(VERSION) last
 	ln -fs "${PWD}/doc/hud" "${DESTDIR}${DATADIR}/radare2/${VERSION}/hud/main"
 	mkdir -p "${DESTDIR}${DATADIR}/radare2/${VERSION}/"
-	sys/ldconfig.sh
-	./configure-plugins --rm-static $(DESTDIR)/$(LIBDIR)/radare2/last/
+	$(SHELL) sys/ldconfig.sh
+	$(SHELL) ./configure-plugins --rm-static $(DESTDIR)/$(LIBDIR)/radare2/last/
 
 deinstall uninstall:
+	rm -f $(DESTDIR)$(BINDIR)/r2-indent
+	rm -f $(DESTDIR)$(BINDIR)/r2-docker
 	cd libr && ${MAKE} uninstall PARENT=1
 	cd binr && ${MAKE} uninstall PARENT=1
 	cd shlr && ${MAKE} uninstall PARENT=1
@@ -264,7 +277,7 @@ deinstall uninstall:
 	@echo
 
 purge-doc:
-	rm -rf "${DESTDIR}${DATADIR}/doc/radare2"
+	rm -rf "${DESTDIR}${DOCDIR}"
 	cd man ; for FILE in *.1 ; do rm -f "${DESTDIR}${MANDIR}/man1/$$FILE" ; done
 	rm -f "${DESTDIR}${MANDIR}/man1/r2.1"
 
@@ -288,6 +301,9 @@ purge-dev:
 	rm -rf "${DESTDIR}${INCLUDEDIR}/libr"
 	rm -f "${DESTDIR}${LIBDIR}/radare2/${VERSION}/-"*
 
+# required for EXT_SO
+include libr/config.mk
+
 strip:
 	-for FILE in ${R2BINS} ; do ${STRIP} -s "${DESTDIR}${BINDIR}/$$FILE" 2> /dev/null ; done
 	-for FILE in "${DESTDIR}${LIBDIR}/libr_"*".${EXT_SO}" "${DESTDIR}${LIBDIR}/libr2.${EXT_SO}" ; do \
@@ -301,6 +317,16 @@ purge: purge-doc purge-dev user-uninstall
 	rm -f "${DESTDIR}${LIBDIR}/libr2.${EXT_SO}"
 	rm -rf "${DESTDIR}${LIBDIR}/radare2"
 	rm -rf "${DESTDIR}${INCLUDEDIR}/libr"
+	rm -rf "${DESTDIR}${DATADIR}/radare2"
+
+purge2:
+	$(MAKE) purge
+ifneq ($(PREFIX),/usr)
+	$(MAKE) purge PREFIX=/usr
+endif
+ifneq ($(PREFIX),/usr/local)
+	$(MAKE) purge PREFIX=/usr/local
+endif
 
 R2V=radare2-${VERSION}
 
@@ -363,6 +389,73 @@ menu nconfig:
 
 pie:
 	sys/pie.sh ${PREVIOUS_RELEASE}
+
+build:
+	$(MESON) --prefix="${PREFIX}" build
+
+meson-windows:
+	cp -f libr/config.mk.meson libr/config.mk
+	cp -f libr/config.h.meson libr/config.h
+
+meson-config meson-cfg meson-conf:
+	# TODO: this is wrong for each platform different plugins must be compiled
+	#cp -f plugins.meson.cfg plugins.cfg
+	#./configure --prefix="${PREFIX}"
+	$(MAKE) libr/include/r_version.h
+	cp -f shlr/spp/config.def.h shlr/spp/config.h
+
+meson: build
+	cmp plugins.meson.cfg plugins.cfg || $(MAKE) meson-config
+	ninja -C build
+
+meson-install:
+	cd build && DESTDIR="$(DESTDIR)" ninja install
+
+B=$(DESTDIR)$(BINDIR)
+L=$(DESTDIR)$(LIBDIR)
+
+meson-symstall:
+	ln -fs $(PWD)/binr/r2pm/r2pm  ${B}/r2pm
+	ln -fs $(PWD)/build/binr/rasm2/rasm2 ${B}/rasm2
+	ln -fs $(PWD)/build/binr/rarun2/rarun2 ${B}/rarun2
+	ln -fs $(PWD)/build/binr/radare2/radare2 ${B}/radare2
+	ln -fs $(PWD)/build/binr/rahash2/rahash2 ${B}/rahash2
+	ln -fs $(PWD)/build/binr/rabin2/rabin2 ${B}/rabin2
+	ln -fs $(PWD)/build/binr/radare2/radare2 ${B}/radare2
+	ln -fs $(PWD)/build/binr/ragg2/ragg2 ${B}/ragg2
+	cd $(B) && ln -fs radare2 r2
+	ln -fs $(PWD)/build/libr/util/libr_util.$(EXT_SO) ${L}/libr_util.$(EXT_SO)
+	ln -fs $(PWD)/build/libr/bp/libr_bp.$(EXT_SO) ${L}/libr_bp.$(EXT_SO)
+	ln -fs $(PWD)/build/libr/syscall/libr_syscall.$(EXT_SO) ${L}/libr_syscall.$(EXT_SO)
+	ln -fs $(PWD)/build/libr/cons/libr_cons.$(EXT_SO) ${L}/libr_cons.$(EXT_SO)
+	ln -fs $(PWD)/build/libr/search/libr_search.$(EXT_SO) ${L}/libr_search.$(EXT_SO)
+	ln -fs $(PWD)/build/libr/magic/libr_magic.$(EXT_SO) ${L}/libr_magic.$(EXT_SO)
+	ln -fs $(PWD)/build/libr/flag/libr_flag.$(EXT_SO) ${L}/libr_flag.$(EXT_SO)
+	ln -fs $(PWD)/build/libr/reg/libr_reg.$(EXT_SO) ${L}/libr_reg.$(EXT_SO)
+	ln -fs $(PWD)/build/libr/bin/libr_bin.$(EXT_SO) ${L}/libr_bin.$(EXT_SO)
+	ln -fs $(PWD)/build/libr/config/libr_config.$(EXT_SO) ${L}/libr_config.$(EXT_SO)
+	ln -fs $(PWD)/build/libr/parse/libr_parse.$(EXT_SO) ${L}/libr_parse.$(EXT_SO)
+	ln -fs $(PWD)/build/libr/lang/libr_lang.$(EXT_SO) ${L}/libr_lang.$(EXT_SO)
+	ln -fs $(PWD)/build/libr/asm/libr_asm.$(EXT_SO) ${L}/libr_asm.$(EXT_SO)
+	ln -fs $(PWD)/build/libr/anal/libr_anal.$(EXT_SO) ${L}/libr_anal.$(EXT_SO)
+	ln -fs $(PWD)/build/libr/egg/libr_egg.$(EXT_SO) ${L}/libr_egg.$(EXT_SO)
+	ln -fs $(PWD)/build/libr/fs/libr_fs.$(EXT_SO) ${L}/libr_fs.$(EXT_SO)
+	ln -fs $(PWD)/build/libr/debug/libr_debug.$(EXT_SO) ${L}/libr_debug.$(EXT_SO)
+	ln -fs $(PWD)/build/libr/core/libr_core.$(EXT_SO) ${L}/libr_core.$(EXT_SO)
+	# TODO: missing libr/*/d .. no sdb binary is compiled to precompile those files
+
+meson-uninstall:
+	$(MAKE) uninstall
+
+meson-clean:
+	rm -rf build
+
+MESON_FILES=$(shell find build/libr build/binr -type f| grep -v @)
+meson-symstall-experimental:
+	for a in $(MESON_FILES) ; do echo ln -fs $(PWD)/$$a $(PWD)/$$(echo $$a|sed -e s,build/,,) ; done
+	$(MAKE) symstall
+
+.PHONY: meson meson-install
 
 include ${MKPLUGINS}
 

@@ -22,7 +22,7 @@ if [ -z "${CC}" ]; then
 		fi
 	done
 	if [ -z "${CC}" ]; then
-		echo "Cannot find CC" > /dev/stderr
+		echo "Cannot find CC" >&2
 		exit 1
 	fi
 fi
@@ -210,7 +210,8 @@ windows)
 	;;
 darwin)
 	#TEXT="__TEXT.__text"
-	TEXT="0.__text"
+	#TEXT="0.__text"
+	TEXT=0.__TEXT.__text
 	FMT=mach0
 	;;
 *|linux)

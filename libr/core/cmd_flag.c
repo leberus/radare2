@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2016 - pancake */
+/* radare - LGPL - Copyright 2009-2017 - pancake */
 
 #include <stddef.h>
 #include "r_cons.h"
@@ -7,13 +7,13 @@
 static void cmd_fz(RCore *core, const char *input) {
 	switch (*input) {
 	case '?':
-		eprintf ("Usage: fz[?|-name| name] [@addr]\n");
-		eprintf (" fz math    add new flagzone named 'math'\n");
-		eprintf (" fz-math    remove the math flagzone\n");
-		eprintf (" fz-*       remove all flagzones\n");
-		eprintf (" fz.        show around flagzone context\n");
-		eprintf (" fz:        show what's in scr.flagzone for visual\n");
-		eprintf (" fz*        dump into r2 commands, for projects\n");
+		r_cons_println ("Usage: fz[?|-name| name] [@addr]");
+		r_cons_println (" fz math    add new flagzone named 'math'");
+		r_cons_println (" fz-math    remove the math flagzone");
+		r_cons_println (" fz-*       remove all flagzones");
+		r_cons_println (" fz.        show around flagzone context");
+		r_cons_println (" fz:        show what's in scr.flagzone for visual");
+		r_cons_println (" fz*        dump into r2 commands, for projects");
 		break;
 	case '.':
 		{
@@ -92,6 +92,53 @@ static void flagbars(RCore *core, const char *glob) {
 			r_print_rangebar (core->print, flag->offset, flag->offset + flag->size, min, max, cols);
 			r_cons_printf ("  %s\n", flag->name);
 		}
+	}
+}
+
+R_API void r_core_print_fortune(RCore *core) {
+	// TODO: use file.fortunes // can be dangerous in sandbox mode
+	const char *fortunes_tips = R2_PREFIX "/share/doc/radare2/fortunes.tips";
+	const char *fortunes_fuun = R2_PREFIX "/share/doc/radare2/fortunes.fun";
+	const char *fortunes_nsfw = R2_PREFIX "/share/doc/radare2/fortunes.nsfw";
+	const char *fortunes_crep = R2_PREFIX "/share/doc/radare2/fortunes.creepy";
+	const char *types = (char *)r_config_get (core->config, "cfg.fortunes.type");
+	char *line = NULL, *templine = NULL;
+	int i = 0;
+	if (strstr (types, "tips")) {
+		templine = r_file_slurp_random_line_count (fortunes_tips, &i);
+		line = templine;
+	}
+	if (strstr (types, "fun")) {
+		templine = r_file_slurp_random_line_count (fortunes_fuun, &i);
+		if (templine) {
+			free (line);
+			line = templine;
+		}
+	}
+	if (strstr (types, "nsfw")) {
+		templine = r_file_slurp_random_line_count (fortunes_nsfw, &i);
+		if (templine) {
+			free (line);
+			line = templine;
+		}
+	}
+	if (strstr (types, "creepy")) {
+		templine = r_file_slurp_random_line_count (fortunes_crep, &i);
+		if (templine) {
+			free (line);
+			line = templine;
+		}
+	}
+	if (line) {
+		if (r_config_get_i (core->config, "cfg.fortunes.clippy")) {
+			r_core_clippy (line);
+		} else {
+			r_cons_printf (" -- %s\n", line);
+		}
+		if (r_config_get_i (core->config, "cfg.fortunes.tts")) {
+			r_sys_tts (line, true);
+		}
+		free (line);
 	}
 }
 
@@ -193,32 +240,39 @@ rep:
 		r_flag_get_i2 (core->flags, r_num_math (core->num, input+1));
 		break;
 	case 'R': // "fR"
-		{
-		if (*str == '\0'){
+		switch(*str) {
+		case '\0':
 			eprintf ("Usage: fR [from] [to] ([mask])\n");
 			eprintf ("Example to relocate PIE flags on debugger:\n"
 				" > fR entry0 `dm~:1[1]`\n");
 			break;
-		}
-		char *p = strchr (str+1, ' ');
-		ut64 from, to, mask = 0xffff;
-		int ret;
-		if (p) {
-			char *q = strchr (p+1, ' ');
-			*p = 0;
-			if (q) {
-				*q = 0;
-				mask = r_num_math (core->num, q+1);
+		case '?':
+			r_cons_println ("Usage: fR [from] [to] ([mask])");
+			r_cons_println ("Example to relocate PIE flags on debugger:\n"
+				" > fR entry0 `dm~:1[1]`");
+			break;
+		default:
+            {
+				char *p = strchr (str+1, ' ');
+				ut64 from, to, mask = 0xffff;
+				int ret;
+				if (p) {
+					char *q = strchr (p+1, ' ');
+					*p = 0;
+					if (q) {
+						*q = 0;
+						mask = r_num_math (core->num, q+1);
+					}
+					from = r_num_math (core->num, str+1);
+					to = r_num_math (core->num, p+1);
+					ret = r_flag_relocate (core->flags, from, mask, to);
+					eprintf ("Relocated %d flags\n", ret);
+				} else {
+					eprintf ("Usage: fR [from] [to] ([mask])\n");
+					eprintf ("Example to relocate PIE flags on debugger:\n"
+						" > fR entry0 `dm~:1[1]`\n");
+				}
 			}
-			from = r_num_math (core->num, str+1);
-			to = r_num_math (core->num, p+1);
-			ret = r_flag_relocate (core->flags, from, mask, to);
-			eprintf ("Relocated %d flags\n", ret);
-		} else {
-			eprintf ("Usage: fR [from] [to] ([mask])\n");
-			eprintf ("Example to relocate PIE flags on debugger:\n"
-				" > fR entry0 `dm~:1[1]`\n");
-		}
 		}
 		break;
 	case 'b': // "fb"
@@ -279,14 +333,16 @@ rep:
 		if (*cstr == '.') {
 			input++;
 			goto rep;
-#if 0
-eprintf ("WTF 'f .xxx' adds a variable to the function? ?!!?(%s)\n");
-			RAnalFunction *fcn = r_anal_get_fcn_in (core->anal, off, 0);
-			if (fcn) r_anal_var_add (core->anal, fcn->addr, 0, off, 'v', "int", 4, str+1);
-			else eprintf ("Cannot find function at 0x%08"PFMT64x"\n", off);
-#endif
 		} else {
-			r_flag_set (core->flags, cstr, off, bsze);
+			bool addFlag = true;
+			if (input[0] == '+') {
+				if (r_flag_get_at (core->flags, off, false)) {
+					addFlag = false;
+				}
+			}
+			if (addFlag) {
+				r_flag_set (core->flags, cstr, off, bsze);
+			}
 		}
 		}
 		break;
@@ -455,6 +511,8 @@ eprintf ("WTF 'f .xxx' adds a variable to the function? ?!!?(%s)\n");
 			const char *help_msg[] = {
 			"Usage: fs","[*] [+-][flagspace|addr]", " # Manage flagspaces",
 			"fs","","display flagspaces",
+			"fs*","","display flagspaces as r2 commands",
+			"fsj","","display flagspaces in JSON",
 			"fs"," *","select all flagspaces",
 			"fs"," flagspace","select flagspace or create if it doesn't exist",
 			"fs","-flagspace","remove flagspace",
@@ -463,6 +521,9 @@ eprintf ("WTF 'f .xxx' adds a variable to the function? ?!!?(%s)\n");
 			"fs","-","pop to the previous flagspace",
 			"fs","-.","remove the current flagspace",
 			"fsm"," [addr]","move flags at given address to the current flagspace",
+			"fss","","display flagspaces stack",
+			"fssj","","display flagspaces stack in JSON",
+			"fss*","","display flagspaces stack in r2 commands",
 			"fsr"," newname","rename selected flagspace",
 			NULL};
 			r_core_cmd_help (core, help_msg);
@@ -477,6 +538,9 @@ eprintf ("WTF 'f .xxx' adds a variable to the function? ?!!?(%s)\n");
 			} else {
 				eprintf ("Usage: fsr [newname]\n");
 			}
+			break;
+		case 's':
+			r_flag_space_stack_list (core->flags, input[2]);
 			break;
 		case '-':
 			switch (input[2]) {
@@ -585,52 +649,8 @@ eprintf ("WTF 'f .xxx' adds a variable to the function? ?!!?(%s)\n");
 			free (p);
 		} else eprintf ("Usage: fC [name] [comment]\n");
 		break;
-	case 'o':
-		{ // TODO: use file.fortunes // can be dangerous in sandbox mode
-			const char *fortunes_tips = R2_PREFIX "/share/doc/radare2/fortunes.tips";
-			const char *fortunes_fuun = R2_PREFIX "/share/doc/radare2/fortunes.fun";
-			const char *fortunes_nsfw = R2_PREFIX "/share/doc/radare2/fortunes.nsfw";
-			const char *fortunes_crep = R2_PREFIX "/share/doc/radare2/fortunes.creepy";
-			const char *types = (char *)r_config_get (core->config, "cfg.fortunes.type");
-			char *line = NULL, *templine = NULL;
-			int i = 0;
-			if (strstr (types, "tips")) {
-				templine = r_file_slurp_random_line_count (fortunes_tips, &i);
-				line = templine;
-			}
-			if (strstr (types, "fun")) {
-				templine = r_file_slurp_random_line_count (fortunes_fuun, &i);
-				if (templine) {
-					free (line);
-					line = templine;
-				}
-			}
-			if (strstr (types, "nsfw")) {
-				templine = r_file_slurp_random_line_count (fortunes_nsfw, &i);
-				if (templine) {
-					free (line);
-					line = templine;
-				}
-			}
-			if (strstr (types, "creepy")) {
-				templine = r_file_slurp_random_line_count (fortunes_crep, &i);
-				if (templine) {
-					free (line);
-					line = templine;
-				}
-			}
-			if (line) {
-				if (r_config_get_i (core->config, "cfg.fortunes.clippy")) {
-					r_core_clippy (line);
-				} else {
-					r_cons_printf (" -- %s\n", line);
-				}
-				if (r_config_get_i (core->config, "cfg.fortunes.tts")) {
-					r_sys_tts (line, true);
-				}
-				free (line);
-			}
-		}
+	case 'o': // "fo"
+		r_core_print_fortune (core);
 		break;
 	case 'r':
 		if (input[1]==' ' && input[2]) {
@@ -700,11 +720,13 @@ eprintf ("WTF 'f .xxx' adds a variable to the function? ?!!?(%s)\n");
 			ut64 addr = core->offset;
 			RFlagItem *f = NULL;
 			bool space_strict = true;
+			bool strict_offset = false;
 			switch (input[1]) {
 			case '?':
 				eprintf ("Usage: fd[d] [offset|flag|expression]\n");
-				eprintf ("  fd $$   # describe flag + delta for given offset\n");
-				eprintf ("  fdd $$  # describe flag without space restrictions\n");
+				eprintf (" fd $$   # describe flag + delta for given offset\n");
+				eprintf (" fd.     # check flags in current address (no delta)\n");
+				eprintf (" fdd $$  # describe flag without space restrictions\n");
 				if (str) {
 					free (str);
 				}
@@ -718,12 +740,19 @@ eprintf ("WTF 'f .xxx' adds a variable to the function? ?!!?(%s)\n");
 					addr = r_num_math (core->num, input + 3);
 				}
 				break;
+			case '.':
+				strict_offset = true;
+				if (input[2] == ' ') {
+					addr = r_num_math (core->num, input + 3);
+				}
+				break;
+				break;
 			default:
 				addr = r_num_math (core->num, input + 2);
 				break;
 			}
 			core->flags->space_strict = space_strict;
-			f = r_flag_get_at (core->flags, addr, true);
+			f = r_flag_get_at (core->flags, addr, !strict_offset);
 			core->flags->space_strict = false;
 			if (f) {
 				if (f->offset != addr) {
@@ -736,10 +765,13 @@ eprintf ("WTF 'f .xxx' adds a variable to the function? ?!!?(%s)\n");
 		}
 		break;
 	case '?':
-	{
+		if (input[1]) {
+			core->num->value = r_flag_get (core->flags, input + 1)? 1: 0;
+		} else {
 		const char *help_msg[] = {
 		"Usage: f","[?] [flagname]", " # Manage offset-name flags",
 		"f","","list flags (will only list flags from selected flagspaces)",
+		"f?","flagname","check if flag exists or not, See ?? and ?!",
 		"f."," [*[*]]","list local per-function flags (*) as r2 commands",
 		"f.","blah=$$+12","set local function label named 'blah'",
 		"f*","","list flags in r commands",
@@ -756,7 +788,7 @@ eprintf ("WTF 'f .xxx' adds a variable to the function? ?!!?(%s)\n");
 		"fa"," [name] [alias]","alias a flag to evaluate an expression",
 		"fb"," [addr]","set base address for new flags",
 		"fb"," [addr] [flag*]","move flags matching 'flag' to relative addr",
-		"fc"," [?][name] [color]","set color for given flag",
+		"fc","[?][name] [color]","set color for given flag",
 		"fC"," [name] [cmt]","set comment for given flag",
 		"fd"," addr","return flag+delta",
 		"fe-","","resets the enumerator counter",
@@ -771,12 +803,12 @@ eprintf ("WTF 'f .xxx' adds a variable to the function? ?!!?(%s)\n");
 		"fo","","show fortunes",
 		//" fc [name] [cmt]  ; set execution command for a specific flag"
 		"fr"," [old] [[new]]","rename flag (if no new flag current seek one is used)",
-		"fR"," [?] [f] [t] [m]","relocate all flags matching f&~m 'f'rom, 't'o, 'm'ask",
+		"fR","[?] [f] [t] [m]","relocate all flags matching f&~m 'f'rom, 't'o, 'm'ask",
 		"fs","[?]+-*","manage flagspaces",
 		"fS","[on]","sort flags by offset or name",
 		"fV","[*-] [nkey] [offset]","dump/restore visual marks (mK/'K)",
 		"fx","[d]","show hexdump (or disasm) of flag:flagsize",
-		"fz"," [?][name]","add named flag zone -name to delete. see fz?[name]",
+		"fz","[?][name]","add named flag zone -name to delete. see fz?[name]",
 		NULL};
 		r_core_cmd_help (core, help_msg);
 		break;

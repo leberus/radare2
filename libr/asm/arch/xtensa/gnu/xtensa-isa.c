@@ -28,7 +28,7 @@
 //#include "libbfd.h"
 #include "../../include/xtensa-isa.h"
 #include "../../include/xtensa-isa-internal.h"
-
+#include "r_types.h"
 extern int filename_cmp (const char *s1, const char *s2);
 xtensa_isa_status xtisa_errno;
 char xtisa_error_msg[1024];
@@ -303,7 +303,7 @@ xtensa_isa_init (xtensa_isa_status *errno_p, char **error_msg_p)
 
   /* Set up the interface lookup table.  */
   isa->interface_lookup_table =
-    bfd_malloc (isa->num_interfaces * sizeof (xtensa_lookup_entry));
+    calloc (isa->num_interfaces, sizeof (xtensa_lookup_entry));
   CHECK_ALLOC_FOR_INIT (isa->interface_lookup_table, NULL, errno_p,
 			error_msg_p);
   for (n = 0; n < isa->num_interfaces; n++)

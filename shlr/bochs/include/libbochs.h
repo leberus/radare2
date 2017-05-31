@@ -19,7 +19,7 @@ typedef struct libbochs_t {
 	HANDLE hWritePipeOut;
 	HANDLE ghWriteEvent;
 	PROCESS_INFORMATION processInfo;
-	STARTUPINFO info;
+	STARTUPINFOA info;
 #else
 	int hReadPipeIn;
 	int hReadPipeOut;
@@ -46,7 +46,11 @@ bool bochs_open(libbochs_t* b, const char *rutaBochs, const char *rutaConfig);
 #if ENABLE_DEBUG
 #define lprintf(x,y...) { FILE *fd;fd=fopen("bochs.io.log", "a"); if (fd) {fprintf(fd,x,##y);fflush(fd);fclose(fd); }}
 #else
+#ifdef _MSC_VER
+#define lprintf(x,...) {}
+#else
 #define lprintf(x,y...) {}
+#endif
 #endif
 
 

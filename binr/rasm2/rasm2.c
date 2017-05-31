@@ -1,14 +1,14 @@
-/* radare - LGPL - Copyright 2009-2016 - pancake, nibble, maijin */
+/* radare - LGPL - Copyright 2009-2017 - pancake, nibble, maijin */
 
+#include "../blob/version.c"
+#include <getopt.c> /* getopt.h is not portable :D */
+#include <r_anal.h>
+#include <r_asm.h>
+#include <r_lib.h>
+#include <r_types.h>
+#include <r_util.h>
 #include <stdio.h>
 #include <string.h>
-#include <getopt.c> /* getopt.h is not portable :D */
-#include <r_types.h>
-#include <r_asm.h>
-#include <r_anal.h>
-#include <r_util.h>
-#include <r_lib.h>
-#include "../blob/version.c"
 
 static RLib *l = NULL;
 static RAsm *a = NULL;
@@ -28,7 +28,7 @@ static int show_analinfo(const char *arg, ut64 offset) {
 	if (json) {
 		printf ("[");
 	}
-	for (ret = 0; ret < len; ) {
+	for (ret = 0; ret < len;) {
 		aop.size = 0;
 		if (r_anal_op (anal, &aop, offset, buf + ret, len - ret) > 0) {
 			//printf ("%s\n", R_STRBUF_SAFEGET (&aop.esil));
@@ -61,8 +61,9 @@ static const char *has_esil(RAnal *lanal, const char *name) {
 	RAnalPlugin *h;
 	r_list_foreach (anal->plugins, iter, h) {
 		if (!strcmp (name, h->name)) {
-			if (h->esil)
+			if (h->esil) {
 				return "Ae";
+			}
 			return "A_";
 		}
 	}
@@ -105,11 +106,18 @@ static void rasm2_list(RAsm *la, const char *arch) {
 				const char *str_bits = "32, 64";
 				const char *license = "GPL";
 				printf ("\"%s\":{\"bits\":[%s],\"license\":\"%s\",\"description\":\"%s\",\"features\":\"%s\"}%s",
-						h->name, str_bits, license, h->desc, feat, iter->n? ",": "");
+					h->name, str_bits, license, h->desc, feat, iter->n? ",": "");
 			} else {
-				printf ("%s%s  %-9s  %-11s %-7s %s\n",
-						feat, feat2, bits, h->name,
-						h->license? h->license: "unknown", h->desc);
+				printf ("%s%s  %-9s  %-11s %-7s %s",
+					feat, feat2, bits, h->name,
+					h->license? h->license: "unknown", h->desc);
+				if (h->author) {
+					printf (" (by %s)", h->author);
+				}
+				if (h->version) {
+					printf (" v%s", h->version);
+				}
+				printf ("\n");
 			}
 		}
 	}
@@ -199,8 +207,7 @@ static int rasm_show_help(int v) {
 			" -i [len]     ignore/skip N bytes of the input buffer\n"
 			" -k [kernel]  Select operating system (linux, windows, darwin, ..)\n"
 			" -l [len]     Input/Output length\n"
-			" -L           List supported asm plugins + features:\n"
-			"               a___ asm, _d__ disasm, __A_ analyzer, ___e ESIL\n"
+			" -L           List Asm plugins: (a=asm, d=disasm, A=analyze, e=ESIL)\n"
 			" -o [offset]  Set start address for code (default 0)\n"
 			" -O [file]    Output file name (rasm2 -Bf a.asm -O a)\n"
 			" -p           Run SPP over input for assembly\n"
@@ -212,19 +219,18 @@ static int rasm_show_help(int v) {
 			" If '-l' value is greater than output length, output is padded with nops\n"
 			" If the last argument is '-' reads from stdin\n");
 		printf ("Environment:\n"
-		" RASM2_NOPLUGINS  do not load shared plugins (speedup loading)\n"
-		" R_DEBUG          if defined, show error messages and crash signal\n"
-		"");
+			" RASM2_NOPLUGINS  do not load shared plugins (speedup loading)\n"
+			" R_DEBUG          if defined, show error messages and crash signal\n"
+			"");
 	}
 	if (v == 2) {
-		printf (
-		"Supported Assembler directives:\n"
-		);
+		printf ("Supported Assembler directives:\n");
 		r_asm_list_directives ();
 	}
 	return 0;
 }
 
+static bool oneliner = false;
 static int rasm_disasm(char *buf, ut64 offset, int len, int bits, int ascii, int bin, int hex) {
 	RAsmCode *acode;
 	ut8 *data = NULL;
@@ -234,7 +240,9 @@ static int rasm_disasm(char *buf, ut64 offset, int len, int bits, int ascii, int
 		len /= 8;
 	}
 	if (bin) {
-		if (len < 0) return false;
+		if (len < 0) {
+			return false;
+		}
 		clen = len; // XXX
 		data = (ut8 *)buf;
 	} else if (ascii) {
@@ -287,7 +295,12 @@ static int rasm_disasm(char *buf, ut64 offset, int len, int bits, int ascii, int
 		if (!(acode = r_asm_mdisassemble (a, data, len))) {
 			goto beach;
 		}
-		printf ("%s", acode->buf_asm);
+		if (oneliner) {
+			r_str_replace_char (acode->buf_asm, '\n', ';');
+			printf ("%s\"\n", acode->buf_asm);
+		} else {
+			printf ("%s", acode->buf_asm);
+		}
 		ret = acode->len;
 		r_asm_code_free (acode);
 	}
@@ -311,6 +324,11 @@ static void print_buf(char *str) {
 		}
 		printf ("\"\n");
 	} else printf ("%s\n", str);
+}
+
+static bool print_label(void *user, const char *k, void *v) {
+	printf ("f label.%s = %s\n", k, (const char *)v);
+	return true;
 }
 
 static int rasm_asm(const char *buf, ut64 offset, ut64 len, int bits, int bin, bool use_spp) {
@@ -365,6 +383,26 @@ static int __lib_anal_dt(RLibPlugin *pl, void *p, void *u) {
 	return true;
 }
 
+static int print_assembly_output(const char *buf, ut64 offset, ut64 len, int bits,
+                                 int bin, bool use_spp, bool rad, char *arch) {
+	int ret = 0;
+	if (rad) {
+		printf ("e asm.arch=%s\n", arch? arch: R_SYS_ARCH);
+		printf ("e asm.bits=%d\n", bits);
+		if (offset) {
+			printf ("s 0x%"PFMT64x"\n", offset);
+		}
+		printf ("wx ");
+	}
+	ret = rasm_asm ((char *)buf, offset, len, a->bits, bin, use_spp);
+	if (rad) {
+		printf ("f entry = $$\n");
+		printf ("f label.main = $$ + 1\n");
+		ht_foreach (a->flags, print_label, NULL);
+	}
+	return ret;
+}
+
 int main (int argc, char *argv[]) {
 	const char *path;
 	const char *env_arch = r_sys_getenv ("RASM2_ARCH");
@@ -372,6 +410,7 @@ int main (int argc, char *argv[]) {
 	unsigned char buf[R_ASM_BUFSIZE];
 	char *arch = NULL, *file = NULL, *filters = NULL, *kernel = NULL, *cpu = NULL, *tmp;
 	bool isbig = false;
+	bool rad = false;
 	bool use_spp = false;
 	ut64 offset = 0;
 	int fd = -1, dis = 0, ascii = 0, bin = 0, ret = 0, bits = 32, c, whatsop = 0;
@@ -419,7 +458,16 @@ int main (int argc, char *argv[]) {
 		r_asm_set_bits (a, sysbits);
 		r_anal_set_bits (anal, sysbits);
 	}
-	while ((c = getopt (argc, argv, "Ai:k:DCc:eEva:b:s:do:Bl:hjLf:F:wqO:p")) != -1) {
+	char *r2arch = r_sys_getenv ("R2_ARCH");
+	if (r2arch) {
+		arch = r2arch;
+	}
+	char *r2bits = r_sys_getenv ("R2_BITS");
+	if (r2bits) {
+		bits = r_num_math (NULL, r2bits);
+		free (r2bits);
+	}
+	while ((c = getopt (argc, argv, "Ai:k:DCc:eEva:b:s:do:Bl:hjLf:F:wqO:pr")) != -1) {
 		switch (c) {
 		case 'a':
 			arch = optarg;
@@ -458,12 +506,15 @@ int main (int argc, char *argv[]) {
 			filters = optarg;
 			break;
 		case 'h':
-			help ++;
+			help++;
 		case 'i':
 			skip = r_num_math (NULL, optarg);
 			break;
 		case 'j':
 			json = true;
+			break;
+		case 'r':
+			rad = true;
 			break;
 		case 'q':
 			quiet = true;
@@ -606,7 +657,8 @@ int main (int argc, char *argv[]) {
 			} else if (analinfo) {
 				ret = show_analinfo ((const char *)buf, offset);
 			} else {
-				ret = rasm_asm ((char *)buf, offset, len, a->bits, bin, use_spp);
+				ret = print_assembly_output ((char *)buf, offset, len,
+								a->bits, bin, use_spp, rad, arch);
 			}
 		} else {
 			content = r_file_slurp (file, &length);
@@ -627,7 +679,8 @@ int main (int argc, char *argv[]) {
 				} else if (analinfo) {
 					ret = show_analinfo ((const char *)buf, offset);
 				} else {
-					ret = rasm_asm (content, offset, length, a->bits, bin, use_spp);
+					ret = print_assembly_output (content, offset, length,
+									a->bits, bin, use_spp, rad, arch);
 				}
 				ret = !ret;
 				free (content);
@@ -689,12 +742,19 @@ int main (int argc, char *argv[]) {
 			if (!strncmp (buf, "0x", 2)) {
 				buf += 2;
 			}
+			if (rad) {
+				oneliner = true;
+				printf ("e asm.arch=%s\n", arch? arch: R_SYS_ARCH);
+				printf ("e asm.bits=%d\n", bits);
+				printf ("\"wa ");
+			}
 			ret = rasm_disasm ((char *)buf, offset, len,
 					a->bits, ascii, bin, dis - 1);
 		} else if (analinfo) {
 			ret = show_analinfo ((const char *)argv[optind], offset);
 		} else {
-			ret = rasm_asm (argv[optind], offset, len, a->bits, bin, use_spp);
+			ret = print_assembly_output (argv[optind], offset, len, a->bits,
+							bin, use_spp, rad, arch);
 		}
 		if (!ret) {
 			eprintf ("invalid\n");

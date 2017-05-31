@@ -46,8 +46,13 @@ static char *stdin_slurp(int *sz) {
 		/* this is faster but have limits */
 		/* run test/add10k.sh script to benchmark */
 		const int buf_size = 96096;
+
 		buf = calloc (1, buf_size);
-		if (!fgets (buf, buf_size - 1, stdin)) {
+		if (!buf) {
+			return NULL;
+		}
+
+		if (!fgets (buf, buf_size, stdin)) {
 			free (buf);
 			return NULL;
 		}
@@ -55,14 +60,19 @@ static char *stdin_slurp(int *sz) {
 			free (buf);
 			return NULL;
 		}
-		int buf_len = strlen (buf) - 1;
-		buf[buf_len] = 0;
-		char *newbuf = realloc (buf, buf_len + 1);
-		if (newbuf) {
-			return newbuf;
+
+		size_t buf_len = strlen (buf);
+		if (buf_len > 0) {
+			buf[buf_len - 1] = '\0';
 		}
-		free (buf);
-		return NULL;
+
+		char *newbuf = realloc (buf, buf_len + 1);
+		// realloc behaves like free if buf_len is 0
+		if (!newbuf && buf_len > 0) {
+			free (buf);
+		}
+
+		return newbuf;
 	}
 #endif
 	buf = calloc (BS + 1, 1);
@@ -112,7 +122,7 @@ static char *stdin_slurp(int *sz) {
 					if (!*next) {
 						next = NULL;
 					} else {
-					//	continue;
+						//	continue;
 					}
 				} else {
 					next = NULL;
@@ -157,9 +167,11 @@ static void synchronize(int sig UNUSED) {
 }
 #endif
 static int sdb_grep_dump(const char *db, int fmt, bool grep,
-			  const char *expgrep) {
+                         const char *expgrep) {
 	char *v;
-	char k[SDB_MAX_KEY] = {0};
+	char k[SDB_MAX_KEY] = {
+		0
+	};
 	const char *comma = "";
 	Sdb *s = sdb_new (NULL, db, 0);
 	if (!s) {
@@ -180,7 +192,7 @@ static int sdb_grep_dump(const char *db, int fmt, bool grep,
 				printf ("%s\"%s\":%s", comma, k, v);
 			} else if (sdb_isnum (v)) {
 				printf ("%s\"%s\":%llu", comma, k, sdb_atoi (v));
-			} else if (*v=='{' || *v=='[') {
+			} else if (*v == '{' || *v == '[') {
 				printf ("%s\"%s\":%s", comma, k, v);
 			} else {
 				printf ("%s\"%s\":\"%s\"", comma, k, v);
@@ -189,7 +201,7 @@ static int sdb_grep_dump(const char *db, int fmt, bool grep,
 			break;
 		case MODE_ZERO:
 			printf ("%s=%s", k, v);
-			fwrite ("", 1,1, stdout);
+			fwrite ("", 1, 1, stdout);
 			break;
 		default:
 			printf ("%s=%s\n", k, v);
@@ -228,7 +240,7 @@ static int insertkeys(Sdb *s, const char **args, int nargs, int mode) {
 				break;
 			case '=':
 				if (strchr (args[i], '=')) {
-					char *v, *kv = (char *)strdup (args[i]);
+					char *v, *kv = (char *) strdup (args[i]);
 					v = strchr (kv, '=');
 					if (v) {
 						*v++ = 0;
@@ -252,7 +264,7 @@ static int createdb(const char *f, const char **args, int nargs) {
 	}
 	insertkeys (s, args, nargs, '=');
 	sdb_config (s, options);
-	for (;(line = stdin_slurp (NULL));) {
+	for (; (line = stdin_slurp (NULL));) {
 		if ((eq = strchr (line, '='))) {
 			*eq++ = 0;
 			sdb_disk_insert (s, line, eq);
@@ -266,7 +278,7 @@ static int createdb(const char *f, const char **args, int nargs) {
 static int showusage(int o) {
 	printf ("usage: sdb [-0cdehjJv|-D A B] [-|db] "
 		"[.file]|[-=]|[-+][(idx)key[:json|=value] ..]\n");
-	if (o==2) {
+	if (o == 2) {
 		printf ("  -0      terminate results with \\x00\n"
 			"  -c      count the number of keys database\n"
 			"  -d      decode base64 from stdin\n"
@@ -282,7 +294,7 @@ static int showusage(int o) {
 }
 
 static int showversion(void) {
-	printf ("sdb "SDB_VERSION"\n");
+	printf ("sdb "SDB_VERSION "\n");
 	fflush (stdout);
 	return 0;
 }
@@ -294,7 +306,7 @@ static int jsonIndent() {
 	if (!in) {
 		return 0;
 	}
-	out = sdb_json_indent (in);
+	out = sdb_json_indent (in, "  ");
 	if (!out) {
 		free (in);
 		return 1;
@@ -308,7 +320,7 @@ static int jsonIndent() {
 static int base64encode() {
 	char *out;
 	int len = 0;
-	ut8 *in = (ut8*)stdin_slurp (&len);
+	ut8 *in = (ut8 *) stdin_slurp (&len);
 	if (!in) {
 		return 0;
 	}
@@ -326,7 +338,7 @@ static int base64encode() {
 static int base64decode() {
 	ut8 *out;
 	int len, ret = 1;
-	char *in = (char*)stdin_slurp (&len);
+	char *in = (char *) stdin_slurp (&len);
 	if (in) {
 		out = sdb_decode (in, &len);
 		if (out) {
@@ -341,10 +353,12 @@ static int base64decode() {
 	return ret;
 }
 
-static int dbdiff (const char *a, const char *b) {
+static int dbdiff(const char *a, const char *b) {
 	int n = 0;
 	char *v;
-	char k[SDB_MAX_KEY] = {0};
+	char k[SDB_MAX_KEY] = {
+		0
+	};
 	const char *v2;
 	Sdb *A = sdb_new (NULL, a, 0);
 	Sdb *B = sdb_new (NULL, b, 0);
@@ -426,7 +440,7 @@ int main(int argc, const char **argv) {
 				return showusage (1);
 			}
 			break;
-		case 'c': return (argc < 3)? showusage (1) : showcount (argv[2]);
+		case 'c': return (argc < 3)? showusage (1): showcount (argv[2]);
 		case 'v': return showversion ();
 		case 'h': return showusage (2);
 		case 'e': return base64encode ();
@@ -440,7 +454,7 @@ int main(int argc, const char **argv) {
 			if (argc > 2) {
 				return sdb_dump (argv[db0 + 1], MODE_JSON);
 			}
-			return jsonIndent();
+			return jsonIndent ();
 		default:
 			eprintf ("Invalid flag %s\n", arg);
 			break;
@@ -478,7 +492,7 @@ int main(int argc, const char **argv) {
 			if (kvs < argc) {
 				save |= insertkeys (s, argv + argi + 2, argc - kvs, '-');
 			}
-			for (;(line = stdin_slurp (NULL));) {
+			for (; (line = stdin_slurp (NULL));) {
 				save |= sdb_query (s, line);
 				if (fmt) {
 					fflush (stdout);

@@ -30,7 +30,14 @@
 
 #include <r_userconf.h>
 #include <r_types.h>
-
+#ifdef _MSC_VER
+#include <sys\stat.h>
+#define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
+#define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
+#define S_IFIFO		(-1)
+#define S_ISFIFO(m)	(((m) & S_IFIFO) == S_IFIFO)
+#define MAXPATHLEN 255
+#endif
 R_LIB_VERSION (r_magic);
 
 #if USE_LIB_MAGIC
@@ -93,7 +100,9 @@ R_API int r_magic_errno(RMagic* m) {
 #include <unistd.h>
 #include <string.h>
 #include <sys/types.h>
+#ifndef _MSC_VER
 #include <sys/param.h>	/* for MAXPATHLEN */
+#endif
 #include <sys/stat.h>
 #include <r_magic.h>
 
@@ -139,7 +148,7 @@ static void free_mlist(struct mlist *mlist) {
 	free (ml);
 }
 
-static int info_from_stat(RMagic *ms, mode_t md) {
+static int info_from_stat(RMagic *ms, unsigned short md) {
 	/* We cannot open it, but we were able to stat it. */
 	if (md & 0222)
 		if (file_printf (ms, "writable, ") == -1)
@@ -164,7 +173,7 @@ static const char *file_or_fd(RMagic *ms, const char *inname, int fd) {
 	int ispipe = 0, rv = -1;
 	unsigned char *buf;
 	struct stat sb;
-	ssize_t nbytes = 0;	/* number of bytes read from a datafile */
+	int  nbytes = 0;	/* number of bytes read from a datafile */
 
 	/*
 	 * one extra for terminating '\0', and

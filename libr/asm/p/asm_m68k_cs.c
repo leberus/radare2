@@ -8,7 +8,11 @@
 #define CAPSTONE_HAS_M68K 1
 #else
 #define CAPSTONE_HAS_M68K 0
+#ifdef _MSC_VER
+#pragma message ("Cannot find capstone-m68k support")
+#else
 #warning Cannot find capstone-m68k support
+#endif
 #endif
 
 #if CAPSTONE_HAS_M68K
@@ -105,7 +109,7 @@ RAsmPlugin r_asm_plugin_m68k_cs = {
 	.cpus = "68000,68010,68020,68030,68040,68060",
 	.license = "BSD",
 	.arch = "m68k",
-	.bits = 32,
+	.bits = 16 | 32,
 	.endian = R_SYS_ENDIAN_LITTLE | R_SYS_ENDIAN_BIG,
 	.disassemble = &disassemble,
 	.mnemonics = &mnemonics,
@@ -130,7 +134,7 @@ RAsmPlugin r_asm_plugin_m68k_cs = {
 	.desc = "Capstone M68K disassembler (unsupported)",
 	.license = "BSD",
 	.arch = "m68k",
-	.bits = 32,
+	.bits = 16 | 32,
 	.endian = R_SYS_ENDIAN_LITTLE | R_SYS_ENDIAN_BIG,
 };
 

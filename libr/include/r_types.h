@@ -1,6 +1,9 @@
 #ifndef R2_TYPES_H
 #define R2_TYPES_H
 
+// defines like IS_DIGIT, etc'
+#include "r_util/r_str_util.h"
+
 // TODO: fix this to make it crosscompile-friendly: R_SYS_OSTYPE ?
 /* operating system */
 #undef __BSD__
@@ -18,6 +21,10 @@
 
 #ifdef R_FREE
 #undef R_FREE
+#endif
+
+#ifdef R_NEWCOPY
+#undef R_NEWCOPY
 #endif
 
 // HACK to fix capstone-android-mips build
@@ -46,7 +53,8 @@
 #undef MAXCOMLEN	/* redefined in zipint.h */
 #endif
 
-#if (OpenBSD >= 201605) /* release >= 5.9 */
+/* release >= 5.9 */
+#if __OpenBSD__ && OpenBSD >= 201605
 #define LIBC_HAVE_PLEDGE 1
 #else
 #define LIBC_HAVE_PLEDGE 0
@@ -73,6 +81,14 @@
 #define MINGW32 1
 #endif
 
+#ifdef _MSC_VER
+  /* Useful for windows _CONTEXT structure declaration */
+  #define _X86_
+  #define strcasecmp stricmp
+  #define strncasecmp strnicmp
+  #define __WINDOWS__ 1
+#endif
+
 #if defined(EMSCRIPTEN) || defined(__linux__) || defined(__APPLE__) || defined(__GNU__) || defined(__ANDROID__) || defined(__QNX__) || defined(__sun)
   #define __BSD__ 0
   #define __UNIX__ 1
@@ -81,17 +97,24 @@
   #define __BSD__ 1
   #define __UNIX__ 1
 #endif
-#if _WIN32 || __CYGWIN__ || MINGW32
-  #define __addr_t_defined
-  #include <windows.h>
-#endif
-#if _WIN32 || MINGW32 && !__CYGWIN__
+#if __WINDOWS__ || _WIN32 || MINGW32 && !(__MINGW64__ || __CYGWIN__)
+  #ifdef _MSC_VER
+  /* Must be included before windows.h */
+  #include <winsock2.h>
+  #define WIN32_LEAN_AND_MEAN
+  #else
+  /* Deprecated */
   #include <winsock.h>
+  #endif
   typedef int socklen_t;
   #undef USE_SOCKETS
   #define __WINDOWS__ 1
   #undef __UNIX__
   #undef __BSD__
+#endif
+#if __WINDOWS__ || _WIN32 || __CYGWIN__ || MINGW32
+  #define __addr_t_defined
+  #include <windows.h>
 #endif
 
 #if defined(__APPLE__) && (__arm__ || __arm64__ || __aarch64__)
@@ -140,18 +163,12 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
-#include <sys/time.h>
 #include <fcntl.h> /* for O_RDONLY */
 #include <r_endian.h> /* needs size_t */
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#define R_LIB_VERSION_HEADER(x) \
-const char *x##_version()
-#define R_LIB_VERSION(x) \
-const char *x##_version () { return "" R2_GITTAP; }
 
 #define TODO(x) eprintf(__func__"  " x)
 
@@ -215,10 +232,17 @@ typedef void (*PrintfCallback)(const char *str, ...);
 #else
   #if defined(__GNUC__) && __GNUC__ >= 4
     #define R_API __attribute__((visibility("default")))
+  #elif defined(_MSC_VER)
+    #define R_API __declspec(dllexport)
   #else
     #define R_API
   #endif
 #endif
+
+#define R_LIB_VERSION_HEADER(x) \
+R_API const char *x##_version()
+#define R_LIB_VERSION(x) \
+R_API const char *x##_version () { return "" R2_GITTAP; }
 
 #define BITS2BYTES(x) (((x)/8)+(((x)%8)?1:0))
 #define ZERO_FILL(x) memset (&x, 0, sizeof (x))
@@ -226,15 +250,19 @@ typedef void (*PrintfCallback)(const char *str, ...);
 #define R_NEWS(x,y) (x*)malloc(sizeof(x)*y)
 #define R_NEW0(x) (x*)calloc(1,sizeof(x))
 #define R_NEW(x) (x*)malloc(sizeof(x))
+#define R_NEWCOPY(x,y) (x*)r_new_copy(sizeof(x), y)
+static inline void *r_new_copy(int size, void *data) {
+	void *a = malloc(size);
+	if (a) {
+		memcpy (a, data, size);
+	}
+	return a;
+}
 // TODO: Make R_NEW_COPY be 1 arg, not two
 #define R_NEW_COPY(x,y) x=(void*)malloc(sizeof(y));memcpy(x,y,sizeof(y))
-#define IS_PRINTABLE(x) (x>=' '&&x<='~')
-#define IS_NUMBER(x) (x>='0'&&x<='9')
-#define IS_WHITESPACE(x) (x==' '||x=='\t')
-#define IS_UPPER(c) ((c) >= 'A' && (c) <= 'Z')
-#define IS_LOWER(c) ((c) >= 'a' && (c) <= 'z')
 #define R_MEM_ALIGN(x) ((void *)(size_t)(((ut64)(size_t)x) & 0xfffffffffffff000LL))
 #define R_ARRAY_SIZE(x) (sizeof (x) / sizeof (x[0]))
+#define R_PTR_MOVE(d,s) d=s;s=NULL;
 
 #define R_PTR_ALIGN(v,t) \
 	((char *)(((size_t)(v) ) \
@@ -276,11 +304,12 @@ typedef void (*PrintfCallback)(const char *str, ...);
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <dirent.h>
-#endif
 #include <unistd.h>
+#include <sys/time.h>
+#endif
 
 #ifndef HAVE_EPRINTF
-#define eprintf(x,y...) fprintf(stderr,x,##y)
+#define eprintf(...) fprintf(stderr,__VA_ARGS__)
 #define eprint(x) fprintf(stderr,"%s\n",x)
 #define HAVE_EPRINTF 1
 #endif
@@ -318,11 +347,15 @@ typedef void (*PrintfCallback)(const char *str, ...);
 #define PFMT64d "I64d"
 #define PFMT64u "I64u"
 #define PFMT64o "I64o"
+#define LDBLFMT "f"
+#define HHXFMT  "x"
 #else
 #define PFMT64x "llx"
 #define PFMT64d "lld"
 #define PFMT64u "llu"
 #define PFMT64o "llo"
+#define LDBLFMT "Lf"
+#define HHXFMT  "hhx"
 #endif
 
 #define PFMT32x "x"
@@ -356,34 +389,57 @@ typedef void (*PrintfCallback)(const char *str, ...);
 #if __i386__
 #define R_SYS_ARCH "x86"
 #define R_SYS_BITS R_SYS_BITS_32
+#define R_SYS_ENDIAN 0
 #elif __x86_64__
 #define R_SYS_ARCH "x86"
 #define R_SYS_BITS (R_SYS_BITS_32 | R_SYS_BITS_64)
+#define R_SYS_ENDIAN 0
 #elif __POWERPC__
 #define R_SYS_ARCH "ppc"
 #define R_SYS_BITS R_SYS_BITS_32
+#define R_SYS_ENDIAN 0
 #elif __arm__
 #define R_SYS_ARCH "arm"
 #define R_SYS_BITS R_SYS_BITS_32
+#define R_SYS_ENDIAN 0
 #elif __arm64__ || __aarch64__
 #define R_SYS_ARCH "arm"
 #define R_SYS_BITS (R_SYS_BITS_32 | R_SYS_BITS_64)
+#define R_SYS_ENDIAN 0
 #elif __arc__
 #define R_SYS_ARCH "arc"
 #define R_SYS_BITS R_SYS_BITS_32
+#define R_SYS_ENDIAN 0
 #elif __sparc__
 #define R_SYS_ARCH "sparc"
 #define R_SYS_BITS R_SYS_BITS_32
+#define R_SYS_ENDIAN 1
 #elif __mips__
 #define R_SYS_ARCH "mips"
 #define R_SYS_BITS R_SYS_BITS_32
+#define R_SYS_ENDIAN 1
 #elif __EMSCRIPTEN__
 /* we should default to wasm when ready */
 #define R_SYS_ARCH "x86"
 #define R_SYS_BITS R_SYS_BITS_32
 #else
+#ifdef _MSC_VER
+#ifdef _WIN64
+#define R_SYS_ARCH "x86"
+#define R_SYS_BITS (R_SYS_BITS_32 | R_SYS_BITS_64)
+#define R_SYS_ENDIAN 0
+#define __x86_64__ 1
+#else
+#define R_SYS_ARCH "x86"
+#define R_SYS_BITS (R_SYS_BITS_32)
+#define __i386__ 1
+#define R_SYS_ENDIAN 0
+#endif
+#else
 #define R_SYS_ARCH "unknown"
 #define R_SYS_BITS R_SYS_BITS_32
+#define R_SYS_ENDIAN 0
+#endif
 #endif
 
 #define R_SYS_ENDIAN_NONE 0
@@ -436,7 +492,7 @@ enum {
 #define R_SYS_OS "darwin"
 #elif defined (__linux__)
 #define R_SYS_OS "linux"
-#elif defined (_WIN32) || defined (__CYGWIN__) || defined (MINGW32)
+#elif defined (__WINDOWS__) || defined (__CYGWIN__) || defined (MINGW32)
 #define R_SYS_OS "windows"
 #elif defined (__NetBSD__ )
 #define R_SYS_OS "netbsd"

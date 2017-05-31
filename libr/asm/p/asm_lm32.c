@@ -151,7 +151,6 @@ static bool is_pseudo_instr_raise(RAsmLm32Instruction *instr) {
 	return instr->op == raise_instr;
 }
 
-
 static int r_asm_lm32_decode(RAsmLm32Instruction *instr) {
 	instr->op = extract_opcode (instr->value);
 	if (instr->op >= RAsmLm32OpcodeNumber) return -1;
@@ -265,7 +264,9 @@ static int write_reg_names_to_struct(RAsmLm32Instruction *instr) {
 }
 
 static int print_pseudo_instruction(RAsmLm32Instruction *instr, char *str) {
-	if (!instr->pseudoInstruction) return -1;
+	if (!instr->pseudoInstruction) {
+		return -1;
+	}
 	switch (instr->op) {
 	//ret == b ra
 	case lm32_op_b:
@@ -387,7 +388,7 @@ static int assemble(RAsm *a, RAsmOp *ao, const char *str) {
 #endif
 
 static int disassemble(RAsm *a, RAsmOp *op, const ut8 *buf, int len) {
-	RAsmLm32Instruction instr;
+	RAsmLm32Instruction instr = {0};
 	instr.value = buf[0] << 24 | buf[1] << 16 | buf[2] << 8 | buf[3];
 	instr.addr = a->pc;
 	if (r_asm_lm32_decode (&instr)) {
@@ -415,7 +416,7 @@ RAsmPlugin r_asm_plugin_lm32 = {
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_ASM,
 	.data = &r_asm_plugin_lm32,
 	.version = R2_VERSION

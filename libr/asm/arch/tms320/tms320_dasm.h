@@ -201,8 +201,7 @@ typedef struct {
 		def_field	(q_lr, 1);
 		def_field	(q_cr, 1);
 	} f;
-
-	RHashTable		* map;
+	SdbHash *map;
 
 #define TMS320_F_CPU_C54X	0x0000001
 #define TMS320_F_CPU_C55X	0x0000002
@@ -218,21 +217,29 @@ typedef struct {
 #define field_value(d, name)		\
 	(d)->f.bf_##name##_value
 
+#ifdef _MSC_VER
+#define set_field_value(d, name, value)	\
+{					\
+	field_valid(d, name) = 1;	\
+	field_value(d, name) = value;	\
+}
+#else
 #define set_field_value(d, name, value)	\
 ({					\
 	field_valid(d, name) = 1;	\
 	field_value(d, name) = value;	\
 })
+#endif
 
 #define LIST_END			{ 0 }
 
 #define INSN_MASK(af, an, av)		{ .f = af, .n = an, .v = av }
 #define INSN_FLAG(af, av)		{ .f = af, .v = TMS320_FLAG_##av }
-#define INSN_SYNTAX(arg...)		(char *)#arg
+#define INSN_SYNTAX(...)		(char *)#__VA_ARGS__
 
-extern int tms320_dasm(tms320_dasm_t *, const ut8 *, int);
+R_API extern int tms320_dasm(tms320_dasm_t *, const ut8 *, int);
 
-extern int tms320_dasm_init(tms320_dasm_t *);
-extern int tms320_dasm_fini(tms320_dasm_t *);
+R_API extern int tms320_dasm_init(tms320_dasm_t *);
+R_API extern int tms320_dasm_fini(tms320_dasm_t *);
 
 #endif /* __TMS320_DASM_H__ */

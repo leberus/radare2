@@ -5,8 +5,12 @@ BINDEPS+=r_debug r_hash r_lang r_anal r_parse r_bp r_reg
 BINDEPS+=r_search r_syscall r_socket r_fs r_magic r_crypto r_util
 
 include ../rules.mk
+
+ifeq ($(WITHNONPIC),1)
 include ../../libr/socket/deps.mk
 include ../../shlr/zip/deps.mk
 include ../../shlr/gdb/deps.mk
+include ../../shlr/java/deps.mk
 include ../../shlr/bochs/deps.mk
 include ../../shlr/qnx/deps.mk
+endif

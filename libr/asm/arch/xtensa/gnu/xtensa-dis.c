@@ -26,10 +26,9 @@
 #include <string.h>
 #include "xtensa-isa.h"
 #include "ansidecl.h"
-#include "libiberty.h"
-#include "dis-asm.h"
-
 #include <setjmp.h>
+#include "dis-asm.h"
+#include "libiberty.h"
 
 extern xtensa_isa xtensa_default_isa;
 
