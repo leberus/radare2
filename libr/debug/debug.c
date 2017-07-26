@@ -1039,6 +1039,16 @@ repeat:
 #endif
 			goto repeat;
 		}
+
+		if (reason == R_DEBUG_REASON_NEW_TID) {
+			ret = dbg->tid;
+			if (!dbg->trace_clone)
+				goto repeat;
+		}
+
+		if (reason == R_DEBUG_REASON_EXIT_TID) {
+			goto repeat;
+		} 
 #endif
 #if __WINDOWS__
 		if (reason != R_DEBUG_REASON_DEAD) {
