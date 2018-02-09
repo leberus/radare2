@@ -105,7 +105,7 @@ static RIODesc *__open (RIO *io, const char *file, int rw, int mode) {
 	int i_port = atoi (port);
 	if (qnxr_connect (&rioq->desc, host, i_port) == 0) {
 		desc = &rioq->desc;
-		rioqnx = r_io_desc_new (&r_io_plugin_qnx, rioq->desc.sock->fd, file, rw, mode, rioq);
+		rioqnx = r_io_desc_new (io, &r_io_plugin_qnx, file, rw, mode, rioq);
 		return rioqnx;
 	}
 	eprintf ("qnx.io.open: Cannot connect to host.\n");
@@ -135,8 +135,8 @@ static int __close (RIODesc *fd) {
 	return -1;
 }
 
-static int __system (RIO *io, RIODesc *fd, const char *cmd) {
-	return true;
+static char *__system (RIO *io, RIODesc *fd, const char *cmd) {
+	return NULL;
 }
 
 RIOPlugin r_io_plugin_qnx = {
@@ -154,7 +154,7 @@ RIOPlugin r_io_plugin_qnx = {
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_IO,
 	.data = &r_io_plugin_qnx,
 	.version = R2_VERSION

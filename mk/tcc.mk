@@ -2,7 +2,8 @@ CC=tcc
 RANLIB=ranlib
 LINK=
 ONELIB=0
-CC_AR=ar -r ${LIBAR}
+AR=ar
+CC_AR=${AR} -r ${LIBAR}
 CC_LIB=${CC} -shared -o ${LIBSO}
 CFLAGS_INCLUDE=-I
 LDFLAGS_LINK=-l
@@ -13,9 +14,11 @@ CFLAGS_OPT2=-O2
 CFLAGS_OPT3=-O3
 
 ifeq ($(OSTYPE),darwin)
+PARTIALLD=ld -r -all_load
 LDFLAGS_LIB=-dynamiclib
 LDFLAGS_SONAME=-Wl,-install_name,
 else
+PARTIALLD=ld -r --whole-archive
 LDFLAGS_LIB=-shared
 LDFLAGS_LIB+=-Dxx
 #Wl,-soname,lib${NAME}.${EXT_SO}.${VERSION}

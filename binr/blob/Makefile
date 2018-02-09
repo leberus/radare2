@@ -24,6 +24,7 @@ CFLAGS+=-I$(SHLR)/spp
 
 #ifeq ($(STATIC_BUILD),1)
 ifeq ($(WITHNONPIC),1)
+LDFLAGS+=../../libr/config/libr_config.a
 LDFLAGS+=../../libr/io/libr_io.a
 LDFLAGS+=../../libr/asm/libr_asm.a
 LDFLAGS+=../../libr/egg/libr_egg.a
@@ -39,21 +40,22 @@ LDFLAGS+=../../libr/flag/libr_flag.a
 LDFLAGS+=../../libr/reg/libr_reg.a
 LDFLAGS+=../../libr/debug/libr_debug.a
 LDFLAGS+=../../libr/search/libr_search.a
-LDFLAGS+=../../libr/config/libr_config.a
 LDFLAGS+=../../libr/lang/libr_lang.a
 LDFLAGS+=../../libr/bp/libr_bp.a
 LDFLAGS+=../../libr/hash/libr_hash.a
 LDFLAGS+=../../libr/bin/libr_bin.a
 LDFLAGS+=../../libr/util/libr_util.a
-LDFLAGS+=../../libr/socket/libr_socket.a
 # extra libs #
+ifeq (1,$(WITH_GPL))
 LDFLAGS+=../../shlr/grub/libgrubfs.a
+endif
 LDFLAGS+=../../shlr/capstone/libcapstone.a
 LDFLAGS+=../../shlr/sdb/src/libsdb.a
 LDFLAGS+=../../shlr/gdb/lib/libgdbr.a
-LDFLAGS+=../../shlr/wind/libr_wind.a
+LDFLAGS+=../../shlr/windbg/libr_windbg.a
 LDFLAGS+=../../shlr/java/libr_java.a
 LDFLAGS+=-lm
+LDFLAGS+=../../libr/socket/libr_socket.a
 else
 LDFLAGS+=-L../../libr/io -lr_io
 LDFLAGS+=-L../../libr/bp -lr_bp
@@ -83,6 +85,7 @@ include ../../libr/config.mk
 include ../../shlr/zip/deps.mk
 include ../../shlr/bochs/deps.mk
 include ../../shlr/qnx/deps.mk
+include ../../shlr/ar/deps.mk
 
 all: symlinks
 

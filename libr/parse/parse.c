@@ -26,6 +26,7 @@ R_API RParse *r_parse_new() {
 	p->notin_flagspace = -1;
 	p->flagspace = -1;
 	p->relsub = false;
+	p->minval = 0x100;
 	p->localvar_only = false;
 	for (i = 0; parse_static_plugins[i]; i++) {
 		r_parse_add (p, parse_static_plugins[i]);
@@ -212,7 +213,7 @@ static int filter(RParse *p, RFlag *f, char *data, char *str, int len, bool big_
 			for (ptr2 = ptr; *ptr2 && (*ptr2 != ']' && (*ptr2 != '\x1b') && !ISSEPARATOR (*ptr2)); ptr2++);
 		}
 		off = r_num_math (NULL, ptr);
-		if (off > 0xff) {
+		if (off >= p->minval) {
 			fcn = p->analb.get_fcn_in (p->anal, off, 0);
 			if (fcn && fcn->addr == off) {
 				*ptr = 0;
@@ -242,7 +243,6 @@ static int filter(RParse *p, RFlag *f, char *data, char *str, int len, bool big_
 						flag = flag2;
 					}
 				}
-
 				if (isvalidflag (flag)) {
 					if (p->notin_flagspace != -1) {
 						if (p->flagspace == flag->space) {
@@ -284,7 +284,6 @@ static int filter(RParse *p, RFlag *f, char *data, char *str, int len, bool big_
 						char *ptr_end = str + strlen (data) + flag_len - 1;
 						char *ptr_right = ptr_end + 1, *ptr_left, *ptr_esc;
 						bool ansi_found = false;
-						int copied_len;
 						while (*ptr_right) {
 							if (*ptr_right == 0x1b) {
 								while (*ptr_right && *ptr_right != 'm') ptr_right++;
@@ -310,11 +309,14 @@ static int filter(RParse *p, RFlag *f, char *data, char *str, int len, bool big_
 								if (ptr_esc < str) {
 									ptr_esc = ptr_end - flag_len + 1;
 								}
-								copied_len = ptr_end - ptr_esc + 1;
+								int copied_len = ptr_end - ptr_esc + 1;
+								if (copied_len < 1) {
+									break;
+								}
 								memmove (ptr_left, ptr_esc, copied_len);
 								sprintf (ptr_left + copied_len, "%s%s",
-									 ansi_found && ptr_right - ptr_end + 1 >= 4 ? "\x1b[0m" : "",
-									 ptr_right + 1);
+										ansi_found && ptr_right - ptr_end + 1 >= 4 ? "\x1b[0m" : "",
+										ptr_right + 1);
 							}
 							break;
 						}
@@ -325,9 +327,14 @@ static int filter(RParse *p, RFlag *f, char *data, char *str, int len, bool big_
 		}
 		if (p->hint) {
 			int pnumleft, immbase = p->hint->immbase;
-			char num[256], *pnum, *tmp;
+			char num[256] = {0}, *pnum, *tmp;
 			bool is_hex = false;
 			int tmp_count;
+			if (p->hint->offset) {
+				*ptr = 0;
+				snprintf (str, len, "%s%s%s", data, p->hint->offset, (ptr != ptr2)? ptr2: "");
+				return true;
+			}
 			strncpy (num, ptr, sizeof (num)-2);
 			pnum = num;
 			if (!strncmp (pnum, "0x", 2)) {
@@ -345,11 +352,7 @@ static int filter(RParse *p, RFlag *f, char *data, char *str, int len, bool big_
 			case 0:
 				// do nothing
 				break;
-			case 1:
-				r_num_to_bits (num, off);
-				strcat (num, "b");
-				break;
-			case 2: // hack for ascii
+			case 1: // hack for ascii
 				tmp_count = 0;
 				for (tmp = data; tmp < ptr; tmp++) {
 					if (*tmp == 0x1b) {
@@ -380,7 +383,7 @@ static int filter(RParse *p, RFlag *f, char *data, char *str, int len, bool big_
 						ch = off & 0xff;
 						off >>= 8;
 					} else {
-						ch = off >> (8 * (sizeof(off) - 1));
+						ch = off >> (8 * (sizeof (off) - 1));
 						off <<= 8;
 					}
 
@@ -402,6 +405,31 @@ static int filter(RParse *p, RFlag *f, char *data, char *str, int len, bool big_
 				}
 				*pnum++ = '\'';
 				*pnum = '\0';
+				break;
+			case 2:
+				r_num_to_bits (num, off);
+				strcat (num, "b");
+				break;
+			case 3:
+				{
+					ut64 swap = 0;
+					if (big_endian) {
+						swap = off & 0xffff;
+					} else {
+						if (off >> 32) {
+							r_mem_swapendian ((ut8*)&swap, (const ut8*)&off, sizeof (off));
+						} else if (off >> 16) {
+							ut32 port = 0;
+							r_mem_swapendian ((ut8*)&port, (const ut8*)&off, sizeof (port));
+							swap = port;
+						} else {
+							ut16 port = 0;
+							r_mem_swapendian ((ut8*)&port, (const ut8*)&off, sizeof (port));
+							swap = port;
+						}
+					}
+					snprintf (num, sizeof (num), "htons (%d)", (int)(swap & 0xFFFF));
+				}
 				break;
 			case 8:
 				snprintf (num, sizeof (num), "0%o", (int)off);
@@ -441,6 +469,43 @@ static int filter(RParse *p, RFlag *f, char *data, char *str, int len, bool big_
 	}
 	strncpy (str, data, len);
 	return false;
+}
+
+R_API bool r_parse_immtrim (char *opstr) {
+	bool changed = false;
+	if (!opstr || !*opstr) {
+		return false;
+	}
+	char *n = strstr (opstr, "0x");
+	if (n) {
+		char *p = n + 2;
+		while (ISHEXCHAR (*p)) {
+			p++;
+		}
+		memmove (n, p, strlen (p) + 1);
+		changed = true;
+	}
+	if (strstr (opstr, " - ]")) {
+		r_str_replace (opstr, " - ]", "]", 1);
+		changed = true;
+	}
+	if (strstr (opstr, " + ]")) {
+		r_str_replace (opstr, " + ]", "]", 1);
+		changed = true;
+	}
+	if (strstr (opstr, ", ]")) {
+		r_str_replace (opstr, ", ]", "]", 1);
+		changed = true;
+	}
+	if (strstr (opstr, " - ")) {
+		r_str_replace (opstr, " - ", "-", 1);
+		changed = true;
+	}
+	if (strstr (opstr, " + ")) {
+		r_str_replace (opstr, " + ", "+", 1);
+		changed = true;
+	}
+	return changed;
 }
 
 R_API int r_parse_filter(RParse *p, RFlag *f, char *data, char *str, int len, bool big_endian) {

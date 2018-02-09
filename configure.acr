@@ -1,5 +1,5 @@
 PKGNAME radare2
-VERSION 1.6.0-git
+VERSION 2.4.0-git
 CONTACT pancake ; pancake@nopcode.org
 
 LANG_C!
@@ -18,7 +18,7 @@ IFAND HAVE_LIB_MAGIC USE_MAGIC {
 	LIBMAGIC = -lmagic ;
 }{
 	USE_LIB_MAGIC = 0 ;
-	LIBMAGIC = -lr_magic ;
+	LIBMAGIC = '' ;
 }
 
 (( useful for static builds . see sys/static.sh ))
@@ -43,16 +43,16 @@ IFAND HAVE_LIB_Z USE_ZIP {
 		LIBZIP = -lz -lzip ;
 	}{
 		USE_LIB_ZIP = 0 ;
-		LIBZIP = -lrz ; (( static linking to shlr/zip ))
+		LIBZIP = '' ; (( static linking to shlr/zip ))
 	}
 }{
 	USE_LIB_ZIP = 0 ;
-	LIBZIP = -lrz ; (( static linking to shlr/zip ))
+	LIBZIP = '' ; (( static linking to shlr/zip ))
 }
 
 ARG_WITHOUT WITH_GPL gpl do not build GPL code (grub, cxx, ... ) ;
 
-(( TODO must deprecate 
+(( TODO must deprecate
 CHKLIB gmp
 ARG_WITHOUT HAVE_GMP gmp disable GMP dependency ;
 IFNOT HAVE_GMP { HAVE_LIB_GMP = 0 ; }
@@ -72,7 +72,7 @@ IFAND WANT_OPENSSL HAVE_OPENSSL {
 }{
 	HAVE_OPENSSL = 0 ;
 }
-IFNULL SSL_LDFLAGS { 
+IFNULL SSL_LDFLAGS {
 	IFNOT HAVE_LIB_SSL {
 		HAVE_OPENSSL = 0 ;
 	}{
@@ -128,6 +128,7 @@ ARG_WITHOUT WITHPIC pic do not build libr as a program independent location ;
 ARG_WITH WITHNONPIC nonpic build the library archives .a ;
 (( this hack is required for openbsd ports ))
 ARG_WITH LIBVERSION=xxx libversion specify different libversion ;
+ARG_WITHOUT HAVE_JEMALLOC jemalloc build without jemalloc ;
 
 IFEQ LIBVERSION xxx ; {
 	LIBVERSION = $VERSION ;
@@ -160,4 +161,6 @@ SUBDIRS ./config-user.mk
 	pkgcfg/r_bp.pc
 	pkgcfg/r_parse.pc
 	pkgcfg/r_fs.pc
+	pkgcfg/r_egg.pc
+	pkgcfg/r_crypto.pc
 ;

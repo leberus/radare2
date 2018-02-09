@@ -68,7 +68,7 @@ echo
 if [ -z "${USE_R2_CAPSTONE}" ]; then
 	pkg-config --atleast-version=4.0 capstone 2>/dev/null
 	if [ $? = 0 ]; then
-		echo '#include <capstone.h>' > .a.c
+		echo '#include <capstone/capstone.h>' > .a.c
 		echo 'int main() {return 0;}' >> .a.c
 		gcc `pkg-config --cflags --libs capstone` -o .a.out .a.c
 		if [ $? = 0 ]; then
@@ -95,8 +95,8 @@ unset DEPS
 ./configure ${CFGARG} --prefix=${PREFIX} || exit 1
 ${MAKE} -s -j${MAKE_JOBS} MAKE_JOBS=${MAKE_JOBS} || exit 1
 if [ "`uname`" = Darwin ]; then
-	${MAKE} osx-sign osx-sign-libs CERTID="${CERTID}" || (
+	${MAKE} macos-sign macos-sign-libs CERTID="${CERTID}" || (
 		echo "CERTID not defined. If you want the bins signed to debug without root"
-		echo "follow the instructions described in doc/osx and run make osx-sign."
+		echo "follow the instructions described in doc/macos.md and run make macos-sign."
 	)
 fi

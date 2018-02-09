@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2007-2016 - pancake */
+/* radare - LGPL - Copyright 2007-2017 - pancake */
 
 #if __WINDOWS__ && MINGW32 && !__CYGWIN__
 #include <stdlib.h>
@@ -72,7 +72,7 @@ R_API char *r_num_units(char *buf, ut64 num) {
 	if (num>=GB) { unit = 'G'; fnum = fnum/GB; } else
 	if (num>=MB) { unit = 'M'; fnum = fnum/MB; } else
 	if (num>=KB) { unit = 'K'; fnum = fnum/KB; } else
-		{ unit = 0; fnum = num; }
+		{ unit = 0; fnum = (double)num; }
 	tnum = (int)((double)(fnum - (int)fnum)*10);
 	if (tnum) {
 		snprintf (buf, 31, "%.1f%c", fnum, unit);
@@ -104,10 +104,15 @@ R_API ut64 r_num_get(RNum *num, const char *str) {
 	ut64 ret = 0LL;
 	ut32 s, a;
 
-	if (!str) return 0;
-	for (; *str==' '; ) str++;
-	if (!*str) return 0;
-
+	if (!str) {
+		return 0;
+	}
+	for (; *str==' '; ) {
+		str++;
+	}
+	if (!*str) {
+		return 0;
+	}
 	/* resolve string with an external callback */
 	if (num && num->callback) {
 		ok = 0;
@@ -126,7 +131,7 @@ R_API ut64 r_num_get(RNum *num, const char *str) {
 	len = strlen (str);
 	if (len > 3 && str[4] == ':') {
 		if (sscanf (str, "%04x", &s) == 1) {
-			if (sscanf (str+5, "%04x", &a)==1) {
+			if (sscanf (str + 5, "%04x", &a)==1) {
 				return (ut64) ((s<<4) + a);
 			}
 		}
@@ -140,9 +145,9 @@ R_API ut64 r_num_get(RNum *num, const char *str) {
 	}
 	if (str[0] == '0' && str[1] == 'b') {
 		ret = 0;
-		for (j = 0, i = strlen (str) - 1; i > 0; i--, j++) { 
+		for (j = 0, i = strlen (str) - 1; i > 0; i--, j++) {
 			if (str[i] == '1') {
-				ret|=1 << j; 
+				ret|=1 << j;
 			} else if (str[i] != '0') {
 				break;
 			}
@@ -150,16 +155,19 @@ R_API ut64 r_num_get(RNum *num, const char *str) {
 		sscanf (str, "0x%"PFMT64x, &ret);
 	} else if (str[0] == '\'') {
 		ret = str[1] & 0xff;
-	} else
-	if (str[0] == '0' && str[1] == 'x') {
-#if 0
-// 32bit chop
-#if __WINDOWS__ && MINGW32 && !__CYGWIN__
-		ret = _strtoui64 (str+2, NULL, 16);
-#endif
-#endif
-		ret = strtoull (str + 2, NULL, 16);
-		//sscanf (str+2, "%"PFMT64x, &ret);
+	} else if (str[0] == '0' && str[1] == 'x') {
+		const char *lodash = strchr (str + 2, '_');
+		if (lodash) {
+			// Support 0x1000_f000_4000
+			// TODO: Only take underscores separated every 4 chars starting at the end
+			char *s = strdup (str + 2);
+			r_str_replace_char (s, '_', 0);
+			ret = strtoull (s, NULL, 16);
+			free (s);
+		} else {
+			ret = strtoull (str + 2, NULL, 16);
+			// sscanf (str+2, "%"PFMT64x, &ret);
+		}
 	} else {
 		lch = str[len > 0? len - 1:0];
 		if (*str == '0' && lch != 'b' && lch != 'h') {
@@ -180,6 +188,17 @@ R_API ut64 r_num_get(RNum *num, const char *str) {
 				} else if (str[i] != '0') {
 					break;
 				}
+			}
+			break;
+		case 't': // ternary
+			ret = 0;
+			ut64 x = 1;
+			for (i = strlen (str) - 2; i >= 0; i--) {
+				if (str[i] < '0' || '2' < str[i]) {
+					return 0;
+				}
+				ret += x * (str[i] - '0');
+				x *= 3;
 			}
 			break;
 		case 'K': case 'k':
@@ -252,14 +271,7 @@ R_API static ut64 r_num_math_internal(RNum *num, char *s) {
 	char *p = s;
 	int i, nop, op = 0;
 	for (i=0; s[i]; i++) {
-		switch (s[i]) {
-		case '/':
-		case '+':
-		case '-':
-		case '*':
-		case '&':
-		case '^':
-		case '|':
+		if (r_num_is_op (s[i])) {
 			nop = s[i]; s[i] = '\0';
 			ret = r_num_op (num, op, ret, r_num_get (num, p));
 			op = s[i] = nop; p = s + i + 1;
@@ -311,14 +323,7 @@ R_API ut64 r_num_math(RNum *num, const char *str) {
 			group[0] = '\0';
 			ret = r_num_op (op, ret, r_num_math_internal (num, p));
 			for (; p<group; p+=1) {
-				switch (*p) {
-				case '+':
-				case '-':
-				case '*':
-				case '/':
-				case '&':
-				case '|':
-				case '^':
+				if (r_num_is_op (*p)) {
 					op = *p;
 					break;
 				}
@@ -391,19 +396,21 @@ R_API int r_num_to_bits (char *out, ut64 num) {
 	return size;
 }
 
-static const char *trit_c = "012";
-
 R_API int r_num_to_trits (char *out, ut64 num) {
-	int i = 63, j;
-	while (i>=0 && num) {
-		out[i] = trit_c[num % 3];
-		num = num/3;
-		i--;
+	if (out == NULL) {
+		return false;
 	}
-	j = 63 - i;
-	i++;
-	memmove (out, &out[i], j);
-	out[j] = '\0';
+	int i;
+	for (i = 0; num; i++, num /= 3) {
+		out[i] = (char) ('0' + num % 3);
+	}
+	if (i == 0) {
+		out[0] = '0';
+		i++;
+	}
+	out[i] = '\0';
+
+	r_str_reverse (out);
 	return true;
 }
 
@@ -536,31 +543,121 @@ R_API ut64 r_get_input_num_value(RNum *num, const char *input_value){
 	return value;
 }
 
+static bool isHexDigit (const char _ch) {
+	const char ch = tolower (_ch);
+	if (IS_DIGIT (ch)) {
+		return true;
+	}
+	return (ch >= 'a' && ch <= 'f');
+}
+
 R_API ut64 r_num_tail(RNum *num, ut64 addr, const char *hex) {
 	ut64 mask = 0LL;
 	ut64 n = 0;
 	char *p;
 	int i;
 
-	while (*hex && (*hex==' ' || *hex=='.')) {
+	while (*hex && (*hex == ' ' || *hex=='.')) {
 		hex++;
 	}
 	i = strlen (hex) * 4;
-	p = malloc (strlen (hex)+10);
+	p = malloc (strlen (hex) + 10);
 	if (p) {
 		strcpy (p, "0x");
-		strcpy (p+2, hex);
-		if (IS_DIGIT(hex[0])) {
+		strcpy (p + 2, hex);
+		if (isHexDigit (hex[0])) {
 			n = r_num_math (num, p);
 		} else {
 			eprintf ("Invalid argument\n");
-			n = 0;
+			return addr;
 		}
 		free (p);
 	}
-	if (!n) {
-		return UT64_MAX;
-	}
 	mask = UT64_MAX << i;
 	return (addr & mask) | n;
+}
+
+R_API int r_num_between(RNum *num, const char *input_value) {
+	int i;
+	ut64 ns[3];
+	char * const str = strdup (input_value);
+	RList *nums = r_num_str_split_list (str);
+	int len = r_list_length (nums);
+	if (len > 3) {
+		len = 3;
+	}
+	for (i = 0; i < len; i++) {
+		ns[i] = r_num_math (num, r_list_pop_head (nums));
+	}
+	free (str);
+	r_list_free (nums);
+	return num->value = R_BETWEEN (ns[0], ns[1], ns[2]);
+}
+
+R_API bool r_num_is_op(const char c) {
+	return c == '/' || c == '+' || c == '-' || c == '*' ||
+		c == '%' || c == '&' || c == '^' || c == '|';
+}
+
+//Assumed *str is parsed as an expression correctly
+R_API int r_num_str_len (const char *str) {
+	int i = 0, len = 0, st;
+	st = 0;//0: number, 1: op
+	if (str[0] == '(') {
+		i++;
+	}
+	while (str[i] != '\0') {
+		switch (st) {
+		case 0: //number
+			while (!r_num_is_op (str[i]) && str[i] != ' '
+			  && str[i] != '\0') {
+				i++;
+				if (str[i] == '(') {
+				  i += r_num_str_len (str+i);
+				}
+			}
+			len = i;
+			st = 1;
+			break;
+		case 1: //op
+			while (str[i] != '\0' && str[i] == ' ') {
+				i++;
+			}
+			if (!r_num_is_op (str[i])) {
+				return len;
+			}
+			if (str[i] == ')') {
+				return i + 1;
+			}
+			i++;
+			while (str[i] != '\0' && str[i] == ' ') {
+				i++;
+			}
+			st = 0;
+			break;
+		}
+	}
+	return len;
+}
+
+R_API int r_num_str_split(char *str) {
+	int i = 0, count = 0;
+	const int len = strlen (str);
+	while (i < len) {
+		i += r_num_str_len (str + i);
+		str[i] = '\0';
+		i++;
+		count++;
+	}
+	return count;
+}
+
+R_API RList *r_num_str_split_list(char *str) {
+	int i, count = r_num_str_split (str);
+	RList *list = r_list_newf (free);
+	for (i = 0; i < count; i++) {
+		r_list_append (list, str);
+		str += strlen (str) + 1;
+	}
+	return list;
 }

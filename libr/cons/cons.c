@@ -1,4 +1,4 @@
-/* radare2 - LGPL - Copyright 2008-2017 - pancake */
+/* radare2 - LGPL - Copyright 2008-2017 - pancake, Jody Frankowski */
 
 #include <r_cons.h>
 #include <r_print.h>
@@ -308,6 +308,7 @@ R_API RCons *r_cons_new() {
 	if (I.refcnt != 1) {
 		return &I;
 	}
+	I.rgbstr = r_cons_rgb_str_off;
 	I.line = r_line_new ();
 	I.highlight = NULL;
 	I.event_interrupt = NULL;
@@ -330,6 +331,7 @@ R_API RCons *r_cons_new() {
 	I.fdin = stdin;
 	I.fdout = 1;
 	I.breaked = false;
+	I.break_lines = false;
 	//I.lines = 0;
 	I.buffer = NULL;
 	I.buffer_sz = 0;
@@ -353,7 +355,7 @@ R_API RCons *r_cons_new() {
 	signal (SIGWINCH, resize);
 #elif __WINDOWS__
 	h = GetStdHandle (STD_INPUT_HANDLE);
-	GetConsoleMode (h, (PDWORD) &I.term_buf);
+	GetConsoleMode (h, &I.term_buf);
 	I.term_raw = 0;
 	if (!SetConsoleCtrlHandler ((PHANDLER_ROUTINE)__w32_control, TRUE)) {
 		eprintf ("r_cons: Cannot set control console handler\n");
@@ -464,8 +466,10 @@ R_API void r_cons_clear_line(int std_err) {
 	} else {
 		char white[1024];
 		memset (&white, ' ', sizeof (white));
-		if (I.columns < sizeof (white)) {
+		if (I.columns > 0 && I.columns < sizeof(white)) {
 			white[I.columns - 1] = 0;
+		} else if (I.columns == 0) {
+			white[0] = 0;
 		} else {
 			white[sizeof (white) - 1] = 0; // HACK
 		}
@@ -503,8 +507,8 @@ R_API void r_cons_reset() {
 	I.grep.line = -1;
 	I.grep.sort = -1;
 	I.grep.sort_invert = false;
-	I.grep.str = NULL;
-	memset (I.grep.tokens, 0, R_CONS_GREP_TOKENS);
+	R_FREE (I.grep.str);
+	ZERO_FILL (I.grep.tokens);
 	I.grep.tokens_used = 0;
 }
 
@@ -515,10 +519,21 @@ R_API const char *r_cons_get_buffer() {
 
 R_API void r_cons_filter() {
 	/* grep */
-	if (I.grep.nstrings > 0 || I.grep.tokens_used || I.grep.less || I.grep.json) {
+	if (I.filter || I.grep.nstrings > 0 || I.grep.tokens_used || I.grep.less || I.grep.json) {
 		r_cons_grepbuf (I.buffer, I.buffer_len);
+		I.filter = false;
 	}
 	/* html */
+	if (I.is_html) {
+		int newlen = 0;
+		char *input = r_str_ndup (I.buffer, I.buffer_len);
+		char *res = r_cons_html_filter (input, &newlen);
+		free (I.buffer);
+		free (input);
+		I.buffer = res;
+		I.buffer_len = newlen;
+		I.buffer_sz = newlen;
+	}
 	/* TODO */
 }
 
@@ -569,8 +584,9 @@ R_API void r_cons_pop() {
 		if (data->grep) {
 			memcpy (&I.grep, data->grep, sizeof (RConsGrep));
 			if (data->grep->str) {
-				free (I.grep.str);
-				I.grep.str = data->grep->str;
+				char *old = I.grep.str;
+				I.grep.str = strdup (data->grep->str);
+				R_FREE (old);
 			}
 		}
 		cons_stack_free ((void *)data);
@@ -616,7 +632,7 @@ R_API void r_cons_flush() {
 			}
 #endif
 			// fix | more | less problem
-			r_cons_set_raw (1);
+			r_cons_set_raw (true);
 		}
 	}
 	if (tee && *tee) {
@@ -632,35 +648,31 @@ R_API void r_cons_flush() {
 	}
 	r_cons_highlight (I.highlight);
 	// is_html must be a filter, not a write endpoint
-	if (I.is_html) {
-		r_cons_html_print (I.buffer);
-	} else {
-		if (I.is_interactive && !r_sandbox_enable (false)) {
-			if (I.linesleep > 0 && I.linesleep < 1000) {
-				int i = 0;
-				int pagesize = R_MAX (1, I.pagesize);
-				char *ptr = I.buffer;
-				char *nl = strchr (ptr, '\n');
-				int len = I.buffer_len;
-				I.buffer[I.buffer_len] = 0;
-				r_cons_break_push (NULL, NULL);
-				while (nl && !r_cons_is_breaked ()) {
-					r_cons_write (ptr, nl - ptr + 1);
-					if (!(i % pagesize)) {
-						r_sys_usleep (I.linesleep * 1000);
-					}
-					ptr = nl + 1;
-					nl = strchr (ptr, '\n');
-					i++;
+	if (I.is_interactive && !r_sandbox_enable (false)) {
+		if (I.linesleep > 0 && I.linesleep < 1000) {
+			int i = 0;
+			int pagesize = R_MAX (1, I.pagesize);
+			char *ptr = I.buffer;
+			char *nl = strchr (ptr, '\n');
+			int len = I.buffer_len;
+			I.buffer[I.buffer_len] = 0;
+			r_cons_break_push (NULL, NULL);
+			while (nl && !r_cons_is_breaked ()) {
+				r_cons_write (ptr, nl - ptr + 1);
+				if (!(i % pagesize)) {
+					r_sys_usleep (I.linesleep * 1000);
 				}
-				r_cons_write (ptr, I.buffer + len - ptr);
-				r_cons_break_pop ();
-			} else {
-				r_cons_write (I.buffer, I.buffer_len);
+				ptr = nl + 1;
+				nl = strchr (ptr, '\n');
+				i++;
 			}
+			r_cons_write (ptr, I.buffer + len - ptr);
+			r_cons_break_pop ();
 		} else {
 			r_cons_write (I.buffer, I.buffer_len);
 		}
+	} else {
+		r_cons_write (I.buffer, I.buffer_len);
 	}
 
 	r_cons_reset ();
@@ -694,8 +706,12 @@ R_API void r_cons_visual_flush() {
 		fps = 0;
 		if (prev) {
 			ut64 now = r_sys_now ();
-			ut64 diff = now-prev;
-			fps = (diff<1000000)? (1000000/diff): 0;
+			st64 diff = (st64)(now - prev);
+			if (diff < 0) {
+				fps = 0;
+			} else {
+				fps = (diff < 1000000)? (1000000.0/diff): 0;
+			}
 			prev = now;
 		} else {
 			prev = r_sys_now ();
@@ -708,7 +724,7 @@ static int real_strlen(const char *ptr, int len) {
 	int utf8len = r_str_len_utf8 (ptr);
 	int ansilen = r_str_ansi_len (ptr);
 	int diff = len - utf8len;
-	if (diff) {
+	if (diff > 0) {
 		diff--;
 	}
 	return ansilen - diff;
@@ -718,6 +734,7 @@ R_API void r_cons_visual_write (char *buffer) {
 	char white[1024];
 	int cols = I.columns;
 	int alen, plen, lines = I.rows;
+	bool break_lines = I.break_lines;
 	const char *endptr;
 	char *nl, *ptr = buffer, *pptr;
 
@@ -727,6 +744,7 @@ R_API void r_cons_visual_write (char *buffer) {
 	memset (&white, ' ', sizeof (white));
 	while ((nl = strchr (ptr, '\n'))) {
 		int len = ((int)(size_t)(nl-ptr))+1;
+		int lines_needed;
 
 		*nl = 0;
 		alen = real_strlen (ptr, len);
@@ -734,9 +752,13 @@ R_API void r_cons_visual_write (char *buffer) {
 		pptr = ptr > buffer ? ptr - 1 : ptr;
 		plen = ptr > buffer ? len : len - 1;
 
-		if (alen > cols) {
+		if (break_lines) {
+			lines_needed = alen / cols + (alen % cols == 0 ? 0 : 1);
+		}
+		if ((break_lines && lines < lines_needed && lines > 0)
+		    || (!break_lines && alen > cols)) {
 			int olen = len;
-			endptr = r_str_ansi_chrn (ptr, cols);
+			endptr = r_str_ansi_chrn (ptr, (break_lines ? cols * lines : cols) + 1);
 			endptr++;
 			len = endptr - ptr;
 			plen = ptr > buffer ? len : len - 1;
@@ -748,7 +770,7 @@ R_API void r_cons_visual_write (char *buffer) {
 			}
 		} else {
 			if (lines > 0) {
-				int w = cols - alen;
+				int w = cols - (alen % cols == 0 ? cols : alen % cols);
 				r_cons_write (pptr, plen);
 				if (I.blankline && w > 0) {
 					if (w > sizeof (white) - 1) {
@@ -763,7 +785,11 @@ R_API void r_cons_visual_write (char *buffer) {
 				r_cons_write (pptr, plen);
 			}
 		}
-		lines--; // do not use last line
+		if (break_lines) {
+			lines -= lines_needed;
+		} else {
+			lines--; // do not use last line
+		}
 		ptr = nl + 1;
 	}
 	/* fill the rest of screen */
@@ -779,25 +805,25 @@ R_API void r_cons_visual_write (char *buffer) {
 
 R_API void r_cons_printf_list(const char *format, va_list ap) {
 	size_t size, written;
-	va_list ap2;
+	va_list ap2, ap3;
 
 	va_copy (ap2, ap);
+	va_copy (ap3, ap);
 	if (I.null || !format) {
 		va_end (ap2);
+		va_end (ap3);
 		return;
 	}
 	if (strchr (format, '%')) {
 		palloc (MOAR + strlen (format) * 20);
 club:
 		size = I.buffer_sz - I.buffer_len - 1; /* remaining space in I.buffer */
-		written = vsnprintf (I.buffer + I.buffer_len, size, format, ap);
+		written = vsnprintf (I.buffer + I.buffer_len, size, format, ap3);
 		if (written >= size) { /* not all bytes were written */
 			palloc (written);
-			written = vsnprintf (I.buffer + I.buffer_len, written, format, ap2);
-			if (written >= size) {
-				palloc (written);
-				goto club;
-			}
+			va_end (ap3);
+			va_copy (ap3, ap2);
+			goto club;
 		}
 		I.buffer_len += written;
 		I.buffer[I.buffer_len] = 0;
@@ -805,6 +831,7 @@ club:
 		r_cons_strcat (format);
 	}
 	va_end (ap2);
+	va_end (ap3);
 }
 
 R_API void r_cons_printf(const char *format, ...) {
@@ -952,6 +979,11 @@ R_API int r_cons_get_size(int *rows) {
 	GetConsoleScreenBufferInfo (GetStdHandle (STD_OUTPUT_HANDLE), &csbi);
 	I.columns = (csbi.srWindow.Right - csbi.srWindow.Left) - 1;
 	I.rows = csbi.srWindow.Bottom - csbi.srWindow.Top; // last row empty
+ 	if (I.columns == -1 && I.rows == 0) {
+		// Stdout is probably redirected so we set default values
+		I.columns = 80;
+		I.rows = 23;
+	}
 #elif EMSCRIPTEN
 	I.columns = 80;
 	I.rows = 23;
@@ -1046,7 +1078,7 @@ R_API void r_cons_show_cursor (int cursor) {
  *
  */
 static int oldraw = -1;
-R_API void r_cons_set_raw(int is_raw) {
+R_API void r_cons_set_raw(bool is_raw) {
 	if (oldraw != -1) {
 		if (is_raw == oldraw) {
 			return;
@@ -1064,9 +1096,9 @@ R_API void r_cons_set_raw(int is_raw) {
 	}
 #elif __WINDOWS__
 	if (is_raw) {
-		SetConsoleMode (h, (DWORD)I.term_raw);
+		SetConsoleMode (h, I.term_raw);
 	} else {
-		SetConsoleMode (h, (DWORD)I.term_buf);
+		SetConsoleMode (h, I.term_buf);
 	}
 #else
 #warning No raw console supported for this platform
@@ -1134,7 +1166,7 @@ R_API void r_cons_column(int c) {
 
 static int lasti = 0; /* last interactive mode */
 
-R_API void r_cons_set_interactive(int x) {
+R_API void r_cons_set_interactive(bool x) {
 	lasti = r_cons_singleton ()->is_interactive;
 	r_cons_singleton ()->is_interactive = x;
 }
@@ -1279,6 +1311,10 @@ R_API const char* r_cons_get_rune(const ut8 ch) {
 		case RUNECODE_CORNER_TR:  return RUNE_CORNER_TR;
 		case RUNECODE_CORNER_BR:  return RUNE_CORNER_BR;
 		case RUNECODE_CORNER_BL:  return RUNE_CORNER_BL;
+		case RUNECODE_CURVE_CORNER_TL:  return RUNE_CURVE_CORNER_TL;
+		case RUNECODE_CURVE_CORNER_TR:  return RUNE_CURVE_CORNER_TR;
+		case RUNECODE_CURVE_CORNER_BR:  return RUNE_CURVE_CORNER_BR;
+		case RUNECODE_CURVE_CORNER_BL:  return RUNE_CURVE_CORNER_BL;
 		}
 	}
 	return NULL;
@@ -1292,5 +1328,42 @@ R_API void r_cons_breakword(const char *s) {
 	} else {
 		I.break_word = NULL;
 		I.break_word_len = 0;
+	}
+}
+
+/* Prints a coloured help message.
+ * help should be an array of the following form:
+ * {"command", "args", "description",
+ * "command2", "args2", "description"}; */
+R_API void r_cons_cmd_help(const char *help[], bool use_color) {
+	RCons *cons = r_cons_singleton ();
+	const char *pal_args_color = use_color ? cons->pal.args : "",
+			*pal_help_color = use_color ? cons->pal.help : "",
+			*pal_reset = use_color ? cons->pal.reset : "";
+	int i, max_length = 0;
+
+	for (i = 0; help[i]; i += 3) {
+		int len0 = strlen (help[i]);
+		int len1 = strlen (help[i + 1]);
+		if (i) {
+			max_length = R_MAX (max_length, len0 + len1);
+		}
+	}
+
+	for (i = 0; help[i]; i += 3) {
+		if (i) {
+			int padding = max_length - (strlen (help[i]) + strlen (help[i + 1]));
+			r_cons_printf("| %s%s%s%*s  %s%s%s\n",
+					help[i],
+					pal_args_color, help[i + 1],
+					padding, "",
+					pal_help_color, help[i + 2], pal_reset);
+		} else {
+			// no need to indent the first line
+			r_cons_printf ("|%s%s %s%s%s\n",
+					pal_help_color,
+					help[i], help[i + 1], help[i + 2],
+					pal_reset);
+		}
 	}
 }

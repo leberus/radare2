@@ -16,11 +16,10 @@ enum {
 };
 
 static bool r_anal_emul_init(RCore *core, RConfigHold *hc) {
-	r_config_save_num (hc, "esil.romem", "asm.trace", "anal.trace", 
-			"dbg.trace", "esil.nonull", NULL);
+	r_config_save_num (hc, "esil.romem", "asm.trace", "dbg.trace",
+			"esil.nonull", NULL);
 	r_config_set (core->config, "esil.romem", "true");
 	r_config_set (core->config, "asm.trace", "true");
-	r_config_set (core->config, "anal.trace", "true");
 	r_config_set (core->config, "dbg.trace", "true");
 	r_config_set (core->config, "esil.nonull", "true");
 	const char *bp = r_reg_get_name (core->anal->reg, R_REG_NAME_BP);
@@ -34,7 +33,6 @@ static bool r_anal_emul_init(RCore *core, RConfigHold *hc) {
 }
 
 static void r_anal_emul_restore(RCore *core, RConfigHold *hc) {
-	sdb_reset (core->anal->esil->db_trace);
 	r_config_restore (hc);
 	r_config_hold_free (hc);
 }
@@ -122,7 +120,7 @@ static void type_match(RCore *core, ut64 addr, char *name) {
 					if (write_addr == sp + size) {
 						ut64 instr_addr = sdb_num_get (trace, sdb_fmt (-1, "%d.addr", j), 0);
 						r_meta_set_string (core->anal, R_META_TYPE_COMMENT, instr_addr,
-							sdb_fmt (-1, "%s %s", type, name));
+								sdb_fmt (-1, "%s%s%s", type, r_str_endswith (type, "*") ? "" : " ", name));
 						char *tmp = sdb_fmt (-1, "%d.mem.read", j);
 						int i2, array_size = sdb_array_size (trace, tmp);
 						for (i2 = 0; i2 < array_size; i2++) {
@@ -212,7 +210,7 @@ static int stack_clean (RCore *core, ut64 addr, RAnalFunction *fcn) {
 		const char *esil = sdb_fmt (-1, "%d,%s,-=", offset, sp);
 		r_anal_esil_parse (core->anal->esil, esil);
 		r_anal_esil_stack_free (core->anal->esil);
-		r_core_esil_step (core, UT64_MAX, NULL);
+		r_core_esil_step (core, UT64_MAX, NULL, NULL);
 		ret = op->size;
 	}
 	r_anal_op_free (op);
@@ -237,7 +235,7 @@ R_API void r_core_anal_type_match(RCore *core, RAnalFunction *fcn) {
 		return;
 	}
 	const char *pc = r_reg_get_name (core->anal->reg, R_REG_NAME_PC);
-	r_list_foreach (fcn->bbs, it,bb) {
+	r_list_foreach (fcn->bbs, it, bb) {
 		ut64 addr = bb->addr;
 		r_reg_setv (core->dbg->reg, pc, bb->addr);
 		r_debug_reg_sync (core->dbg, R_REG_TYPE_ALL, true);
@@ -246,32 +244,42 @@ R_API void r_core_anal_type_match(RCore *core, RAnalFunction *fcn) {
 			RAnalOp *op = r_core_anal_op (core, addr);
 			int loop_count = sdb_num_get (core->anal->esil->db_trace, sdb_fmt (-1, "0x%"PFMT64x".count", addr), 0);
 			if (loop_count > LOOP_MAX || !op || op->type == R_ANAL_OP_TYPE_RET || addr >= bb->addr + bb->size || addr < bb->addr) {
+				r_anal_op_free (op);
 				break;
 			}
 			sdb_num_set (core->anal->esil->db_trace, sdb_fmt (-1, "0x%"PFMT64x".count", addr), loop_count + 1, 0);
-			if (op->type == R_ANAL_OP_TYPE_CALL) {
-				RAnalFunction *fcn_call = r_anal_get_fcn_in (core->anal, op->jump, -1);
-				if (fcn_call) {
-					type_match (core, addr, fcn_call->name);
+			switch (op->type) {
+			case R_ANAL_OP_TYPE_CALL:
+				{
+					RAnalFunction *fcn_call = r_anal_get_fcn_in (core->anal, op->jump, -1);
+					if (fcn_call) {
+						type_match (core, addr, fcn_call->name);
+					}
+					addr += op->size;
+					r_anal_op_free (op);
+					r_reg_setv (core->dbg->reg, pc, addr);
+					r_debug_reg_sync (core->dbg, R_REG_TYPE_ALL, true);
+					r_anal_esil_set_pc (core->anal->esil, addr);
+					addr += stack_clean (core, addr, fcn);
+					r_reg_setv (core->dbg->reg, pc, addr);
+					r_debug_reg_sync (core->dbg, R_REG_TYPE_ALL, true);
+					r_anal_esil_set_pc (core->anal->esil, addr);
+					break;
 				}
-				addr += op->size;
-				r_anal_op_free (op);
-				r_reg_setv (core->dbg->reg, pc, addr);
-				r_debug_reg_sync (core->dbg, R_REG_TYPE_ALL, true);
-				r_anal_esil_set_pc (core->anal->esil, addr);
-				addr += stack_clean (core, addr, fcn);
-				r_reg_setv (core->dbg->reg, pc, addr);
-				r_debug_reg_sync (core->dbg, R_REG_TYPE_ALL, true);
-				r_anal_esil_set_pc (core->anal->esil, addr);
-			} else {
-				r_core_esil_step (core, UT64_MAX, NULL);
-				r_anal_op_free (op);
-				r_core_cmd0 (core, ".ar*");
-				addr = r_reg_getv (core->anal->reg, pc);
+				break;
+			default:
+				{
+				   r_core_esil_step (core, UT64_MAX, NULL, NULL);
+				   r_anal_op_free (op);
+				   r_core_cmd0 (core, ".ar*");
+				   addr = r_reg_getv (core->anal->reg, pc);
+				}
+				break;
 			}
 		}
+		r_cons_break_pop();
 	}
 	r_cons_break_pop ();
 	r_anal_emul_restore (core, hc);
-
+	sdb_reset (core->anal->esil->db_trace);
 }

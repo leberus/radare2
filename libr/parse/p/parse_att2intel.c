@@ -81,7 +81,7 @@ static int parse(RParse *p, const char *data, char *str) {
 	ptr = strchr (buf, '#');
 	if (ptr) {
 		*ptr = 0;
-		r_str_chop (buf);
+		r_str_trim (buf);
 	}
 	if (*buf == '.' || buf[strlen(buf)-1] == ':') {
 		free (buf);
@@ -154,7 +154,7 @@ static int parse(RParse *p, const char *data, char *str) {
 	return true;
 }
 
-struct r_parse_plugin_t r_parse_plugin_att2intel = {
+RParsePlugin r_parse_plugin_att2intel = {
 	.name = "att2intel",
 	.desc = "X86 att 2 intel plugin",
 	.init = NULL,
@@ -163,7 +163,7 @@ struct r_parse_plugin_t r_parse_plugin_att2intel = {
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_PARSE,
 	.data = &r_parse_plugin_att2intel,
 	.version = R2_VERSION

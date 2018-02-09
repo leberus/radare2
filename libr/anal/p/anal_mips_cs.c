@@ -192,6 +192,10 @@ static int analop_esil(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len
 	case MIPS_INS_BREAK:
 		r_strbuf_setf (&op->esil, "%d,%d,TRAP", IMM (0), IMM (0));
 		break;
+	case MIPS_INS_SD:
+		r_strbuf_appendf (&op->esil, "%s,%s,=[8]",
+			ARG (0), ARG (1));
+		break;
 	case MIPS_INS_SW:
 	case MIPS_INS_SWL:
 	case MIPS_INS_SWR:
@@ -419,6 +423,7 @@ static int analop_esil(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len
 		}
 		break;
 	case MIPS_INS_LI:
+	case MIPS_INS_LDI:
 		r_strbuf_appendf (&op->esil, "0x%"PFMT64x",%s,=", IMM(1), ARG(0));
 		break;
 	case MIPS_INS_LUI:
@@ -436,13 +441,15 @@ static int analop_esil(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len
 	case MIPS_INS_LWR:
 	case MIPS_INS_LWU:
 	case MIPS_INS_LL:
-	case MIPS_INS_LLD:
-	case MIPS_INS_LD:
-	case MIPS_INS_LDI:
+		ESIL_LOAD ("4");
+		break;
+
 	case MIPS_INS_LDL:
 	case MIPS_INS_LDC1:
 	case MIPS_INS_LDC2:
-		ESIL_LOAD ("4");
+	case MIPS_INS_LLD:
+	case MIPS_INS_LD:
+		ESIL_LOAD ("8");
 		break;
 
 	case MIPS_INS_LWX:
@@ -580,7 +587,20 @@ static int analop(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *buf, int len) 
 	cs_insn* insn;
 	int mode = anal->big_endian? CS_MODE_BIG_ENDIAN: CS_MODE_LITTLE_ENDIAN;
 
-	mode |= (anal->bits==64)? CS_MODE_64: CS_MODE_32;
+	if (anal->cpu && *anal->cpu) {
+		if (!strcmp (anal->cpu, "micro")) {
+			mode |= CS_MODE_MICRO;
+		} else if (!strcmp (anal->cpu, "r6")) {
+			mode |= CS_MODE_MIPS32R6;
+		} else if (!strcmp (anal->cpu, "v3")) {
+			mode |= CS_MODE_MIPS3;
+		} else if (!strcmp (anal->cpu, "v2")) {
+#if CS_API_MAJOR > 3
+			mode |= CS_MODE_MIPS2;
+#endif
+		}
+	}
+	mode |= (anal->bits==64)? CS_MODE_MIPS64: CS_MODE_MIPS32;
 	if (mode != omode || anal->bits != obits) {
 		cs_close (&hndl);
 		hndl = 0;
@@ -646,7 +666,10 @@ static int analop(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *buf, int len) 
 		}
 		// TODO: fill
 		break;
+	case MIPS_INS_SD:
 	case MIPS_INS_SW:
+	case MIPS_INS_SB:
+	case MIPS_INS_SH:
 	case MIPS_INS_SWC1:
 	case MIPS_INS_SWC2:
 	case MIPS_INS_SWL:
@@ -703,7 +726,11 @@ static int analop(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *buf, int len) 
 			break;
 		}
 		break;
+	case MIPS_INS_LI:
 	case MIPS_INS_LUI:
+		SET_VAL (op, 1);
+		op->type = R_ANAL_OP_TYPE_MOV;
+		break;
 	case MIPS_INS_MOVE:
 		op->type = R_ANAL_OP_TYPE_MOV;
 		SET_SRC_DST_2_REGS (op);
@@ -846,12 +873,12 @@ static int analop(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *buf, int len) 
 		break;
 	case MIPS_INS_JR:
 	case MIPS_INS_JRC:
-		op->type = R_ANAL_OP_TYPE_JMP;
+		op->type = R_ANAL_OP_TYPE_RJMP;
 		op->delay = 1;
-        // register is $ra, so jmp is a return
-        if (insn->detail->mips.operands[0].reg == MIPS_REG_RA) {
-            op->type = R_ANAL_OP_TYPE_RET;
-        }
+		// register is $ra, so jmp is a return
+		if (insn->detail->mips.operands[0].reg == MIPS_REG_RA) {
+			op->type = R_ANAL_OP_TYPE_RET;
+		}
 		break;
 	case MIPS_INS_SLTI:
 	case MIPS_INS_SLTIU:
@@ -960,7 +987,7 @@ RAnalPlugin r_anal_plugin_mips_cs = {
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_ANAL,
 	.data = &r_anal_plugin_mips_cs,
 	.version = R2_VERSION

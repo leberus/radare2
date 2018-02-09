@@ -17,26 +17,28 @@ static int lang_pipe_file(RLang *lang, const char *file) {
 
 #if __WINDOWS__
 static HANDLE  myCreateChildProcess(const char * szCmdline) {
-	PROCESS_INFORMATION piProcInfo;
-	STARTUPINFOA siStartInfo;
+	PROCESS_INFORMATION piProcInfo = {0};
+	STARTUPINFO siStartInfo = {0};
 	BOOL bSuccess = FALSE;
-	ZeroMemory (&piProcInfo, sizeof (PROCESS_INFORMATION));
-	ZeroMemory (&siStartInfo, sizeof (STARTUPINFO));
 	siStartInfo.cb = sizeof (STARTUPINFO);
-	char * szCmdLine2 = strdup (szCmdline);
-	bSuccess = CreateProcessA (NULL, szCmdLine2, NULL, NULL,
+	LPTSTR cmdline_ = r_sys_conv_utf8_to_utf16 (szCmdline);
+	bSuccess = CreateProcess (NULL, cmdline_, NULL, NULL,
 		TRUE, 0, NULL, NULL, &siStartInfo, &piProcInfo);
-	free (szCmdLine2);
+	free (cmdline_);
 	//CloseHandle (piProcInfo.hProcess);
 	//CloseHandle (piProcInfo.hThread);
 	return bSuccess? piProcInfo.hProcess: NULL;
 }
-static BOOL bStopThread = FALSE;
+static BOOL bStopPipeLoop = FALSE;
 static HANDLE hPipeInOut = NULL;
 static HANDLE hproc = NULL;
 #define PIPE_BUF_SIZE 4096
-static DWORD WINAPI ThreadFunction(LPVOID lpParam) {
-	RLang * lang = lpParam;
+static DWORD WINAPI WaitForProcThread(LPVOID lParam) {
+	WaitForSingleObject(hproc, INFINITE);
+	bStopPipeLoop = TRUE;
+	return 0;
+}
+static void lang_pipe_run_win(RLang *lang) {
 	CHAR buf[PIPE_BUF_SIZE];
 	BOOL bSuccess = FALSE;
 	int i, res = 0;
@@ -45,7 +47,7 @@ static DWORD WINAPI ThreadFunction(LPVOID lpParam) {
 	res = ConnectNamedPipe (hPipeInOut, NULL);
 	if (!res) {
 		eprintf ("ConnectNamedPipe failed\n");
-		return FALSE;
+		return;
 	}
 	do {
 		if (r_cons_is_breaked ()) {
@@ -54,7 +56,7 @@ static DWORD WINAPI ThreadFunction(LPVOID lpParam) {
 		}
 		memset (buf, 0, PIPE_BUF_SIZE);
 		bSuccess = ReadFile (hPipeInOut, buf, PIPE_BUF_SIZE, &dwRead, NULL);
-                if (bStopThread)
+		if (bStopPipeLoop)
 			break;
 		if (bSuccess && dwRead>0) {
 			buf[sizeof (buf)-1] = 0;
@@ -66,7 +68,7 @@ static DWORD WINAPI ThreadFunction(LPVOID lpParam) {
 					dwWritten = 0;
 					int writelen=res_len - i;
 					int rc = WriteFile (hPipeInOut, res + i, writelen>PIPE_BUF_SIZE?PIPE_BUF_SIZE:writelen, &dwWritten, 0);
-					if (bStopThread) {
+					if (bStopPipeLoop) {
 						free (res);
 						break;
 					}
@@ -87,9 +89,8 @@ static DWORD WINAPI ThreadFunction(LPVOID lpParam) {
 				WriteFile (hPipeInOut, "", 1, &dwWritten, NULL);
 			}
 		}
-	} while(!bStopThread);
+	} while(!bStopPipeLoop);
 	r_cons_break_pop ();
-	return TRUE;
 }
 #else
 static void env(const char *s, int f) {
@@ -177,11 +178,13 @@ static int lang_pipe_run(RLang *lang, const char *code, int len) {
 	return true;
 #else
 #if __WINDOWS__
-	HANDLE hThread = 0;
 	char *r2pipe_var = r_str_newf ("R2PIPE_IN%x", _getpid ());
 	char *r2pipe_paz = r_str_newf ("\\\\.\\pipe\\%s", r2pipe_var);
-	SetEnvironmentVariableA ("R2PIPE_PATH", r2pipe_var);
-	hPipeInOut = CreateNamedPipeA (r2pipe_paz,
+	LPTSTR r2pipe_var_ = r_sys_conv_utf8_to_utf16 (r2pipe_var);
+	LPTSTR r2pipe_paz_ = r_sys_conv_utf8_to_utf16 (r2pipe_paz);
+
+	SetEnvironmentVariable (TEXT ("R2PIPE_PATH"), r2pipe_var_);
+	hPipeInOut = CreateNamedPipe (r2pipe_paz_,
 			PIPE_ACCESS_DUPLEX,
 			PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT, PIPE_UNLIMITED_INSTANCES,
 			PIPE_BUF_SIZE,
@@ -189,16 +192,18 @@ static int lang_pipe_run(RLang *lang, const char *code, int len) {
 			0, NULL);
 	hproc = myCreateChildProcess (code);
 	if (hproc) {
-		bStopThread = FALSE;
-		hThread = CreateThread (NULL, 0, ThreadFunction, lang, 0,0);
-		WaitForSingleObject (hproc, INFINITE);
-		bStopThread = TRUE;
-		DeleteFileA (r2pipe_paz);
-		WaitForSingleObject (hThread, INFINITE);
+		/* a separate thread is created that sets bStopPipeLoop once hproc terminates. */
+		bStopPipeLoop = FALSE;
+		CloseHandle (CreateThread (NULL, 0, WaitForProcThread, NULL, 0, NULL));
+		/* lang_pipe_run_win has to run in the command thread to prevent deadlock. */
+		lang_pipe_run_win (lang);
+		DeleteFile (r2pipe_paz_);
 		CloseHandle (hPipeInOut);
 	}
 	free (r2pipe_var);
 	free (r2pipe_paz);
+	free (r2pipe_var_);
+	free (r2pipe_paz_);
 	return hproc != NULL;
 #endif
 #endif

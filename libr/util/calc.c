@@ -1,4 +1,4 @@
-/* ported to C by pancake for r2 in 2012-2014 */
+/* ported to C by pancake for r2 in 2012-2017 */
 // TODO: integrate floating point support
 // TODO: do not use global variables
 /*
@@ -31,6 +31,7 @@ static inline RNumCalcValue Nmul(RNumCalcValue n, RNumCalcValue v) {
 	n.n *= v.n;
 	return n;
 }
+
 static inline RNumCalcValue Nshl(RNumCalcValue n, RNumCalcValue v) { n.d += v.d; n.n <<= v.n; return n; }
 static inline RNumCalcValue Nshr(RNumCalcValue n, RNumCalcValue v) { n.d += v.d; n.n >>= v.n; return n; }
 static inline RNumCalcValue Nmod(RNumCalcValue n, RNumCalcValue v) {
@@ -38,6 +39,7 @@ static inline RNumCalcValue Nmod(RNumCalcValue n, RNumCalcValue v) {
 	if (v.n) n.n %= v.n; else n.n = 0;
 	return n;
 }
+
 static inline RNumCalcValue Ndiv(RNumCalcValue n, RNumCalcValue v) {
 	if (v.d) n.d /= v.d; else n.d = 0;
 	if (v.n) n.n /= v.n; else n.n = 0;
@@ -112,7 +114,7 @@ static RNumCalcValue prim(RNum *num, RNumCalc *nc, int get) {
 	case RNCNAME:
 		//fprintf (stderr, "error: unknown keyword (%s)\n", nc->string_value);
 		//double& v = table[nc->string_value];
-		r_str_chop (nc->string_value);
+		r_str_trim (nc->string_value);
 		v = Nset (r_num_get (num, nc->string_value));
 		get_token (num, nc);
 		if (nc->curr_tok  == RNCASSIGN) {
@@ -203,7 +205,7 @@ static int cin_get_num(RNum *num, RNumCalc *nc, RNumCalcValue *n) {
 	char c;
 	str[0] = 0;
 	while (cin_get (num, nc, &c)) {
-		if (c!=':' && c!='.' && !isalnum ((ut8)c)) {
+		if (c != '_' && c!=':' && c!='.' && !isalnum ((ut8)c)) {
 			cin_putback (num, nc, c);
 			break;
 		}
@@ -228,8 +230,11 @@ static int cin_get_num(RNum *num, RNumCalc *nc, RNumCalcValue *n) {
 static RNumCalcToken get_token(RNum *num, RNumCalc *nc) {
 	char ch = 0, c = 0;
 
-	do { if (!cin_get (num, nc, &ch)) return nc->curr_tok = RNCEND;
-	} while (ch!='\n' && isspace ((unsigned char)ch));
+	do {
+		if (!cin_get (num, nc, &ch)) {
+			return nc->curr_tok = RNCEND;
+		}
+	} while (ch != '\n' && isspace ((ut8)ch));
 
 	switch (ch) {
 	case 0:

@@ -9,15 +9,23 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <r_lib.h>
 #if __UNIX__
 #include <sys/mman.h>
+#include <limits.h>
 #endif
-#if __APPLE__
+#if __APPLE__ && __MAC_10_5
+#define HAVE_COPYFILE_H 1
+#else
+#define HAVE_COPYFILE_H 0
+#endif
+#if HAVE_COPYFILE_H
 #include <copyfile.h>
 #endif
 #if _MSC_VER
 #include <process.h>
 #endif
+
 R_API bool r_file_truncate (const char *filename, ut64 newsize) {
 	int fd;
 	if (r_file_is_directory (filename)) {
@@ -121,6 +129,14 @@ R_API bool r_file_exists(const char *str) {
 	if (!str || !*str) {
 		return false;
 	}
+#if 0
+	// TODO: file_exists doesnt uses the sandbox or many things may fail
+	if (strncmp (str, "/usr/bin", 8)) {
+		if (str && !r_sandbox_check_path (str)) {
+			return false;
+		}
+	}
+#endif
 #ifdef _MSC_VER
 	WIN32_FIND_DATAA FindFileData;
 	HANDLE handle = FindFirstFileA (str, &FindFileData);
@@ -173,6 +189,10 @@ R_API char *r_file_abspath(const char *file) {
 		if (cwd && *file != '/')
 			ret = r_str_newf ("%s"R_SYS_DIR"%s", cwd, file);
 #elif __WINDOWS__ && !__CYGWIN__
+		// Network path
+		if (!strncmp (file, "\\\\", 2)) {
+			return strdup (file);
+		}
 		if (cwd && !strchr (file, ':')) {
 			ret = r_str_newf ("%s\\%s", cwd, file);
 		}
@@ -183,15 +203,11 @@ R_API char *r_file_abspath(const char *file) {
 		ret = strdup (file);
 	}
 #if __UNIX__
-	{
-		char *resolved_path = calloc(4096, 1); // TODO: use MAXPATH
-		char *abspath = realpath (ret, resolved_path);
-		if (abspath) {
-			free (ret);
-			ret = abspath;
-		} else {
-			free (resolved_path);
-		}
+	char resolved_path[PATH_MAX] = {0};
+	char *abspath = realpath (ret, resolved_path);
+	if (abspath) {
+		free (ret);
+		ret = strdup (abspath);
 	}
 #endif
 	return ret;
@@ -242,7 +258,8 @@ R_API char *r_stdin_slurp (int *sz) {
 		return NULL;
 	}
 	buf = malloc (BS);
-	if (!buf) {	
+	if (!buf) {
+		close (newfd);
 		return NULL;
 	}
 	for (i = ret = 0; ; i += ret) {
@@ -535,13 +552,21 @@ R_API bool r_file_hexdump(const char *file, const ut8 *buf, int len, int append)
 		eprintf ("Cannot open '%s' for writing\n", file);
 		return false;
 	}
-	for (i = 0; i< len; i+= 16) {
+	for (i = 0; i < len; i += 16) {
+		int l = R_MIN (16, len - i);
 		fprintf (fd, "0x%08"PFMT64x"  ", (ut64)i);
-		for (j = 0; j<16; j+=2) {
+		for (j = 0; j + 2 <= l; j += 2) {
 			fprintf (fd, "%02x%02x ", buf[i +j], buf[i+j+1]);
 		}
+		if (j < l) {
+			fprintf (fd, "%02x   ", buf[i + j]);
+			j += 2;
+		}
+		if (j < 16) {
+			fprintf (fd, "%*s ", (16 - j) / 2 * 5, "");
+		}
 		for (j = 0; j < 16; j++) {
-			fprintf (fd, "%c", IS_PRINTABLE (buf[i + j])? buf[i+j]: '.');
+			fprintf (fd, "%c", j < l && IS_PRINTABLE (buf[i + j])? buf[i+j]: '.');
 		}
 		fprintf (fd, "\n");
 	}
@@ -583,13 +608,21 @@ R_API bool r_file_rm(const char *file) {
 	}
 	if (r_file_is_directory (file)) {
 #if __WINDOWS__
-		return !RemoveDirectoryA (file);
+		LPTSTR file_ = r_sys_conv_utf8_to_utf16 (file);
+		bool ret = RemoveDirectory (file_);
+
+		free (file_);
+		return !ret;
 #else
 		return !rmdir (file);
 #endif
 	} else {
 #if __WINDOWS__
-		return !DeleteFileA (file);
+		LPTSTR file_ = r_sys_conv_utf8_to_utf16 (file);
+		bool ret = DeleteFile (file_);
+
+		free (file_);
+		return !ret;
 #else
 		return !unlink (file);
 #endif
@@ -617,23 +650,34 @@ R_API char *r_file_readlink(const char *path) {
 
 R_API int r_file_mmap_write(const char *file, ut64 addr, const ut8 *buf, int len) {
 #if __WINDOWS__
-	HANDLE fh;
+	HANDLE fh = INVALID_HANDLE_VALUE;
 	DWORD written = 0;
-	if (r_sandbox_enable (0)) return -1;
-	fh = CreateFileA (file, GENERIC_READ|GENERIC_WRITE,
+	LPTSTR file_ = NULL;
+	int ret = -1;
+
+	if (r_sandbox_enable (0)) {
+		return -1;
+	}
+	file_ = r_sys_conv_utf8_to_utf16 (file);
+	fh = CreateFile (file_, GENERIC_READ|GENERIC_WRITE,
 		FILE_SHARE_READ | FILE_SHARE_WRITE,
 		NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	if (fh == INVALID_HANDLE_VALUE) {
-		r_sys_perror ("r_file_mmap_write: CreateFile");
-		return -1;
+		r_sys_perror ("r_file_mmap_write/CreateFile");
+		goto err_r_file_mmap_write;
 	}
 	SetFilePointer (fh, addr, NULL, FILE_BEGIN);
-	if (!WriteFile (fh, buf, len,  &written, NULL)) {
-		r_sys_perror ("WriteFile");
-		len = -1;
+	if (!WriteFile (fh, buf, (DWORD)len,  &written, NULL)) {
+		r_sys_perror ("r_file_mmap_write/WriteFile");
+		goto err_r_file_mmap_write;
 	}
-	CloseHandle (fh);
-	return len;
+	ret = len;
+err_r_file_mmap_write:
+	free (file_);
+	if (fh != INVALID_HANDLE_VALUE) {
+		CloseHandle (fh);
+	}
+	return ret;
 #elif __UNIX__
 	int fd = r_sandbox_open (file, O_RDWR|O_SYNC, 0644);
 	const int pagesize = getpagesize ();
@@ -661,28 +705,36 @@ R_API int r_file_mmap_write(const char *file, ut64 addr, const ut8 *buf, int len
 
 R_API int r_file_mmap_read (const char *file, ut64 addr, ut8 *buf, int len) {
 #if __WINDOWS__
-	HANDLE fm, fh;
+	HANDLE fm = NULL, fh = INVALID_HANDLE_VALUE;
+	LPTSTR file_ = NULL;
+	int ret = -1;
 	if (r_sandbox_enable (0)) {
 		return -1;
 	}
-	fh = CreateFileA (file, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0);
+	file_ = r_sys_conv_utf8_to_utf16 (file);
+	fh = CreateFile (file_, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, 0);
 	if (fh == INVALID_HANDLE_VALUE) {
-		r_sys_perror ("CreateFile");
-		return -1;
+		r_sys_perror ("r_file_mmap_read/CreateFile");
+		goto err_r_file_mmap_read;
 	}
-	fm = CreateFileMappingA (fh, NULL, PAGE_READONLY, 0, 0, NULL);
-	if (fm != INVALID_HANDLE_VALUE) {
-		ut8 *obuf = MapViewOfFile (fm, FILE_MAP_READ, 0, 0, len);
-		memcpy (obuf, buf, len);
-		UnmapViewOfFile (obuf);
-	} else {
+	fm = CreateFileMapping (fh, NULL, PAGE_READONLY, 0, 0, NULL);
+	if (!fm) {
 		r_sys_perror ("CreateFileMapping");
-		CloseHandle (fh);
-		return -1;
+		goto err_r_file_mmap_read;
 	}
-	CloseHandle (fh);
-	CloseHandle (fm);
-	return len;
+	ut8 *obuf = MapViewOfFile (fm, FILE_MAP_READ, 0, 0, len);
+	memcpy (obuf, buf, len);
+	UnmapViewOfFile (obuf);
+	ret = len;
+err_r_file_mmap_read:
+	if (fh != INVALID_HANDLE_VALUE) {
+		CloseHandle (fh);
+	}
+	if (fm) {
+		CloseHandle (fm);
+	}
+	free (file_);
+	return ret;
 #elif __UNIX__
 	int fd = r_sandbox_open (file, O_RDONLY, 0644);
 	const int pagesize = 4096;
@@ -718,27 +770,37 @@ static RMmap *r_file_mmap_unix (RMmap *m, int fd) {
 }
 #elif __WINDOWS__
 static RMmap *r_file_mmap_windows (RMmap *m, const char *file) {
-	m->fh = CreateFileA (file, GENERIC_READ | (m->rw?GENERIC_WRITE:0),
+	LPTSTR file_ = r_sys_conv_utf8_to_utf16 (file);
+	bool success = false;
+
+	m->fh = CreateFile (file_, GENERIC_READ | (m->rw?GENERIC_WRITE:0),
 		FILE_SHARE_READ|(m->rw?FILE_SHARE_WRITE:0), NULL,
 		OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	if (m->fh == INVALID_HANDLE_VALUE) {
 		r_sys_perror ("CreateFile");
-		free (m);
-		return NULL;
+		goto err_r_file_mmap_windows;
 	}
-	m->fm = CreateFileMappingA (m->fh, NULL, PAGE_READONLY, 0, 0, NULL);
+	m->fm = CreateFileMapping (m->fh, NULL, PAGE_READONLY, 0, 0, NULL);
 		//m->rw?PAGE_READWRITE:PAGE_READONLY, 0, 0, NULL);
-	if (m->fm != INVALID_HANDLE_VALUE) {
-		m->buf = MapViewOfFile (m->fm, 
-			// m->rw?(FILE_MAP_READ|FILE_MAP_WRITE):FILE_MAP_READ,
-			FILE_MAP_COPY,
-			UT32_HI (m->base), UT32_LO (m->base), 0);
-	} else {
+	if (!m->fm) {
 		r_sys_perror ("CreateFileMapping");
-		CloseHandle (m->fh);
+		goto err_r_file_mmap_windows;
+
+	}
+	m->buf = MapViewOfFile (m->fm,
+		// m->rw?(FILE_MAP_READ|FILE_MAP_WRITE):FILE_MAP_READ,
+		FILE_MAP_COPY,
+		UT32_HI (m->base), UT32_LO (m->base), 0);
+	success = true;
+err_r_file_mmap_windows:
+	if (!success) {
+		if (m->fh != INVALID_HANDLE_VALUE) {
+			CloseHandle (m->fh);
+		}
 		free (m);
 		m = NULL;
 	}
+	free (file_);
 	return m;
 }
 #else
@@ -840,36 +902,82 @@ R_API char *r_file_temp (const char *prefix) {
 }
 
 R_API int r_file_mkstemp(const char *prefix, char **oname) {
-	int h;
+	int h = -1;
 	char *path = r_file_tmpdir ();
-	char name[1024];
 #if __WINDOWS__
-	h = -1;
-	if (GetTempFileNameA (path, prefix, 0, name)) {
-		h = r_sandbox_open (name, O_RDWR|O_EXCL|O_BINARY, 0644);
+	LPTSTR name = NULL;
+	LPTSTR path_ = r_sys_conv_utf8_to_utf16 (path);
+	LPTSTR prefix_ = r_sys_conv_utf8_to_utf16 (prefix);
+
+	name = (LPTSTR)malloc (sizeof (TCHAR) * (MAX_PATH + 1));
+	if (!name) {
+		goto err_r_file_mkstemp;
 	}
+	if (GetTempFileName (path_, prefix_, 0, name)) {
+		char *name_ = r_sys_conv_utf16_to_utf8 (name);
+		h = r_sandbox_open (name_, O_RDWR|O_EXCL|O_BINARY, 0644);
+		if (oname) {
+			if (h != -1) {
+				*oname = name_;
+			} else {
+				*oname = NULL;
+				free (name_);
+			}
+		} else {
+			free (name_);
+		}
+	}
+err_r_file_mkstemp:
+	free (name);
+	free (path_);
+	free (prefix_);
 #else
-	mode_t mask;
-	snprintf (name, sizeof (name), "%s/%sXXXXXX", path, prefix);
-	mask = umask(S_IWGRP | S_IWOTH);
+	char name[1024];
+
+	snprintf (name, sizeof (name) - 1, "%s/r2.%s.XXXXXX", path, prefix);
+	mode_t mask = umask (S_IWGRP | S_IWOTH);
 	h = mkstemp (name);
-	umask(mask);
-#endif
+	umask (mask);
 	if (oname) {
 		*oname = (h!=-1)? strdup (name): NULL;
 	}
+#endif
 	free (path);
 	return h;
 }
 
 R_API char *r_file_tmpdir() {
 #if __WINDOWS__
-	char *path = r_sys_getenv ("TEMP");
-	if (!path) {
-		path = strdup ("C:\\WINDOWS\\Temp\\");
+	LPTSTR tmpdir;
+	char *path = NULL;
+	DWORD len = 0;
+
+	tmpdir = (LPTSTR)calloc (1, sizeof (TCHAR) * (MAX_PATH + 1));
+	if (!tmpdir) {
+		return NULL;
 	}
-#elif __ANDROID__
-	char *path = strdup ("/data/data/org.radare.radare2installer/radare2/tmp");
+	if ((len = GetTempPath (MAX_PATH + 1, tmpdir)) == 0) {
+		path = r_sys_getenv ("TEMP");
+		if (!path) {
+			path = strdup ("C:\\WINDOWS\\Temp\\");
+		}
+	} else {
+		tmpdir[len] = 0;
+		DWORD (WINAPI *glpn)(LPCTSTR, LPCTSTR, DWORD) = r_lib_dl_sym (GetModuleHandle (TEXT ("kernel32.dll")), W32_TCALL("GetLongPathName"));
+		if (glpn) {
+			// Windows XP sometimes returns short path name
+			glpn (tmpdir, tmpdir, MAX_PATH + 1);
+		}
+		path = r_sys_conv_utf16_to_utf8 (tmpdir);
+	}
+	free (tmpdir);
+	// Windows 7, stat() function fail if tmpdir ends with '\\'
+	if (path) {
+		int path_len = strlen (path);
+		if (path_len > 0 && path[path_len - 1] == '\\') {
+			path[path_len - 1] = '\0';
+		}
+	}
 #else
 	char *path = r_sys_getenv ("TMPDIR");
 	if (path && !*path) {
@@ -877,7 +985,11 @@ R_API char *r_file_tmpdir() {
 		path = NULL;
 	}
 	if (!path) {
+#if __ANDROID__
+		path = strdup ("/data/data/org.radare.radare2installer/radare2/tmp");
+#else
 		path = strdup ("/tmp");
+#endif
 	}
 #endif
 	if (!r_file_is_directory (path)) {
@@ -889,7 +1001,7 @@ R_API char *r_file_tmpdir() {
 R_API bool r_file_copy (const char *src, const char *dst) {
 	/* TODO: implement in C */
 	/* TODO: Use NO_CACHE for iOS dyldcache copying */
-#if __APPLE__
+#if HAVE_COPYFILE_H
 	return copyfile (src, dst, 0, 0) != -1;
 #elif __WINDOWS__
 	return r_sys_cmdf ("copy %s %s", src, dst);

@@ -255,7 +255,7 @@ int ReadMemory (RIO *io, RIODesc *iodesc, int ioctl_n, size_t pid, size_t addres
 	bool flag = 0;
 	ut8 garbage;
 
-	if (iodesc && iodesc->fd > 0 && buf) {
+	if (iodesc && iodesc->data > 0 && buf) {
 		struct r2k_data data;
 
 		data.pid = pid;
@@ -266,12 +266,12 @@ int ReadMemory (RIO *io, RIODesc *iodesc, int ioctl_n, size_t pid, size_t addres
 			return -1;
 		}
 
-		ret = ioctl (iodesc->fd, ioctl_n, &data);
+		ret = ioctl ((int)(size_t)iodesc->data, ioctl_n, &data);
 		if (!ret) {
 			memcpy (buf, data.buff, len);
 			ret = len;
 		} else {
-			garbage = io->ff ? io->Oxff : 0xff;
+			garbage = 0xff;
 			flag = 0;
 			offset = 0;
 			pagesize = getpagesize();
@@ -279,7 +279,7 @@ int ReadMemory (RIO *io, RIODesc *iodesc, int ioctl_n, size_t pid, size_t addres
 			pageaddr -= (pageaddr % pagesize);
 			if ((len - (int)(pageaddr - address)) > 0) {
 				data.len = pageaddr - address;
-				ret = ioctl (iodesc->fd, ioctl_n, &data);
+				ret = ioctl ((int)(size_t)iodesc->data, ioctl_n, &data);
 				if (!ret) {
 					memcpy (buf + offset, data.buff, pageaddr - address);
 					flag = 1;
@@ -293,7 +293,7 @@ int ReadMemory (RIO *io, RIODesc *iodesc, int ioctl_n, size_t pid, size_t addres
 					data.addr = pageaddr;
 					data.len = pagesize;
 
-					ret = ioctl (iodesc->fd, ioctl_n, &data);
+					ret = ioctl ((int)(size_t)iodesc->data, ioctl_n, &data);
 					if (!ret) {
 						memcpy (buf + offset, data.buff, pagesize);
 						flag = 1;
@@ -307,7 +307,7 @@ int ReadMemory (RIO *io, RIODesc *iodesc, int ioctl_n, size_t pid, size_t addres
 
 				data.addr = pageaddr;
 				data.len = newlen;
-				ret = ioctl (iodesc->fd, ioctl_n, &data);
+				ret = ioctl ((int)(size_t)iodesc->data, ioctl_n, &data);
 				if (!ret) {
 					memcpy (buf + offset, data.buff, newlen);
 					flag = 1;
@@ -330,7 +330,7 @@ int ReadMemory (RIO *io, RIODesc *iodesc, int ioctl_n, size_t pid, size_t addres
 int WriteMemory (RIO *io, RIODesc *iodesc, int ioctl_n, size_t pid, ut64 address, const ut8 *buf, int len) {
 	int ret = -1;
 
-	if (iodesc && iodesc->fd > 0 && buf) {
+	if (iodesc && iodesc->data > 0 && buf) {
 		struct r2k_data data;
 
 		data.pid = pid;
@@ -344,7 +344,7 @@ int WriteMemory (RIO *io, RIODesc *iodesc, int ioctl_n, size_t pid, ut64 address
 		}
 
 		memcpy (data.buff, buf, len);
-		ret = ioctl (iodesc->fd, ioctl_n, &data);
+		ret = ioctl ((int)(size_t)iodesc->data, ioctl_n, &data);
 		if (!ret) {
 			ret = len;
 		} else {
@@ -486,7 +486,7 @@ int run_ioctl_command(RIO *io, RIODesc *iodesc, const char *buf) {
 			if (databuf) {
 				ret = ReadMemory (io, iodesc, ioctl_n, pid, addr, databuf, len);
 				if (ret > 0) {
-					r_print_hexdump (print, addr, (const ut8 *) databuf, ret, 16, 1);
+					r_print_hexdump (print, addr, (const ut8 *) databuf, ret, 16, 1, 1);
 				}
 			} else {
 				io->cb_printf ("Failed to allocate buffer\n");
@@ -579,7 +579,7 @@ int run_ioctl_command(RIO *io, RIODesc *iodesc, const char *buf) {
 			long page_size = sysconf (_SC_PAGESIZE);
 
 			ioctl_n = IOCTL_GET_KERNEL_MAP;
-			ret = ioctl (iodesc->fd, ioctl_n, &map_data);
+			ret = ioctl ((int)(size_t)iodesc->data, ioctl_n, &map_data);
 
 			if (ret < 0) {
 				io->cb_printf ("ioctl err: %s\n", strerror (errno));
@@ -587,7 +587,7 @@ int run_ioctl_command(RIO *io, RIODesc *iodesc, const char *buf) {
 			}
 
 			io->cb_printf ("map_data.size: %d, map_data.n_entries: %d\n", map_data.size, map_data.n_entries);
-			info = mmap (0, map_data.size, PROT_READ, MAP_SHARED, iodesc->fd, 0);
+			info = mmap (0, map_data.size, PROT_READ, MAP_SHARED, (int)(size_t)iodesc->data, 0);
 			if (info == MAP_FAILED) {
 				io->cb_printf ("mmap err: %s\n", strerror (errno));
 				break;
@@ -616,7 +616,7 @@ int run_ioctl_command(RIO *io, RIODesc *iodesc, const char *buf) {
 			//=! R[p]
 			struct r2k_control_reg reg_data;
 			ioctl_n = IOCTL_READ_CONTROL_REG;
-			ret = ioctl (iodesc->fd, ioctl_n, &reg_data);
+			ret = ioctl ((int)(size_t)iodesc->data, ioctl_n, &reg_data);
 
 			if (ret) {
 				io->cb_printf ("ioctl err: %s\n", strerror (errno));
@@ -697,7 +697,7 @@ int run_ioctl_command(RIO *io, RIODesc *iodesc, const char *buf) {
 			proc_data.pid = pid;
 			ioctl_n = IOCTL_PRINT_PROC_INFO;
 
-			ret = ioctl (iodesc->fd, ioctl_n, &proc_data);
+			ret = ioctl ((int)(size_t)iodesc->data, ioctl_n, &proc_data);
 			if (ret) {
 				io->cb_printf ("ioctl err: %s\n", strerror (errno));
 				break;
@@ -709,14 +709,15 @@ int run_ioctl_command(RIO *io, RIODesc *iodesc, const char *buf) {
 				for (i = 0; i < buffsize;) {
 					nextstart = 0;
 					if (i + 7 < buffsize) {
-						nextstart = i + 7 + (strlen ((const char *)&(proc_data.vmareastruct[i+7])) - 1 + sizeof (size_t)) / sizeof (size_t);
+						nextstart = i + 7 + (strlen ((const char *)&(proc_data.vmareastruct[i + 7])) - 1 + sizeof (size_t)) / sizeof (size_t);
 					}
-					if (!proc_data.vmareastruct[i] && !proc_data.vmareastruct[i+1] &&
+					if (!proc_data.vmareastruct[i] && (i + 1 < buffsize) &&
+						!proc_data.vmareastruct[i + 1] &&
 					    nextstart > 0 && nextstart - 1 < buffsize) {
 						break;
 					}
-					io->cb_printf ("f pid.%d.%s.%d.start=0x%"PFMT64x"\n", proc_data.pid, &(proc_data.vmareastruct[i+7]), j, (ut64) proc_data.vmareastruct[i]);
-					io->cb_printf ("f pid.%d.%s.%d.end=0x%"PFMT64x"\n", proc_data.pid, &(proc_data.vmareastruct[i+7]), j, (ut64) proc_data.vmareastruct[i+1]);
+					io->cb_printf ("f pid.%d.%s.%d.start=0x%"PFMT64x"\n", proc_data.pid, &(proc_data.vmareastruct[i + 7]), j, (ut64) proc_data.vmareastruct[i]);
+					io->cb_printf ("f pid.%d.%s.%d.end=0x%"PFMT64x"\n", proc_data.pid, &(proc_data.vmareastruct[i + 7]), j, (ut64) proc_data.vmareastruct[i + 1]);
 					j += 1;
 					i = nextstart;
 				}
@@ -725,21 +726,21 @@ int run_ioctl_command(RIO *io, RIODesc *iodesc, const char *buf) {
 				for (i = 0; i < buffsize;) {
 					nextstart = 0;
 					if (i + 7 < buffsize) {
-						nextstart = i + 7 + (strlen ((const char *)&(proc_data.vmareastruct[i+7])) - 1 + sizeof (size_t)) / sizeof (size_t);
+						nextstart = i + 7 + (strlen ((const char *)&(proc_data.vmareastruct[i + 7])) - 1 + sizeof (size_t)) / sizeof (size_t);
 					}
-					if (!proc_data.vmareastruct[i] && !proc_data.vmareastruct[i+1] &&
+					if (!proc_data.vmareastruct[i] && !proc_data.vmareastruct[i + 1] &&
 					    nextstart > 0 && nextstart - 1 < buffsize) {
 						break;
 					}
 					io->cb_printf ("%08"PFMT64x"-%08"PFMT64x" %c%c%c%c %08"PFMT64x" %02x:%02x %-8"PFMT64u"",
 							(ut64) proc_data.vmareastruct[i], (ut64) proc_data.vmareastruct[i+1],
-							proc_data.vmareastruct[i+2] & VM_READ ? 'r' : '-',
-							proc_data.vmareastruct[i+2] & VM_WRITE ? 'w' : '-',
-							proc_data.vmareastruct[i+2] & VM_EXEC ? 'x' : '-',
-							proc_data.vmareastruct[i+2] & VM_MAYSHARE ? 's' : 'p',
-							(ut64) proc_data.vmareastruct[i+3], proc_data.vmareastruct[i+4],
-							proc_data.vmareastruct[i+5], (ut64) proc_data.vmareastruct[i+6]);
-					io->cb_printf ("\t%s\n", &(proc_data.vmareastruct[i+7]));
+							proc_data.vmareastruct[i + 2] & VM_READ ? 'r' : '-',
+							proc_data.vmareastruct[i + 2] & VM_WRITE ? 'w' : '-',
+							proc_data.vmareastruct[i + 2] & VM_EXEC ? 'x' : '-',
+							proc_data.vmareastruct[i + 2] & VM_MAYSHARE ? 's' : 'p',
+							(ut64) proc_data.vmareastruct[i + 3], proc_data.vmareastruct[i + 4],
+							proc_data.vmareastruct[i + 5], (ut64) proc_data.vmareastruct[i + 6]);
+					io->cb_printf ("\t%s\n", &(proc_data.vmareastruct[i + 7]));
 					i = nextstart;
 				}
 				io->cb_printf ("STACK BASE ADDRESS = 0x%"PFMT64x"\n", (void *) proc_data.stack);

@@ -4,6 +4,7 @@
 #include <r_util.h>
 #include <r_lib.h>
 #include <r_bin.h>
+
 #include "pe_specs.h"
 
 #ifndef _INCLUDE_R_BIN_PE_H_
@@ -21,7 +22,7 @@ struct r_bin_pe_addr_t {
 };
 
 struct r_bin_pe_section_t {
-	ut8 name[PE_IMAGE_SIZEOF_SHORT_NAME * 2];
+	ut8 name[PE_IMAGE_SIZEOF_SHORT_NAME * 3];
 	ut64 size;
 	ut64 vsize;
 	ut64 vaddr;
@@ -71,6 +72,13 @@ typedef struct _PE_RESOURCE {
 	Pe_image_resource_data_entry *data;
 } r_pe_resource;
 
+#define GUIDSTR_LEN 34
+#define DBG_FILE_NAME_LEN 255
+
+typedef struct SDebugInfo {
+	char guidstr[GUIDSTR_LEN];
+	char file_name[DBG_FILE_NAME_LEN];
+} SDebugInfo;
 
 #endif
 
@@ -114,14 +122,6 @@ struct PE_(r_bin_pe_obj_t) {
 	RCMS* cms;
 	bool is_signed;
 };
-
-#define GUIDSTR_LEN 34
-#define DBG_FILE_NAME_LEN 255
-
-typedef struct SDebugInfo {
-	char guidstr[GUIDSTR_LEN];
-	char file_name[DBG_FILE_NAME_LEN];
-} SDebugInfo;
 
 void PE_(r_bin_store_all_resource_version_info)(struct PE_(r_bin_pe_obj_t)* bin);
 char* PE_(r_bin_pe_get_arch)(struct PE_(r_bin_pe_obj_t)* bin);

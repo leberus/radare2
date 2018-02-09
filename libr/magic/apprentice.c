@@ -168,7 +168,7 @@ static void init_file_tables(void) {
 	}
 	done++;
 	for (p = type_tbl; p->len; p++) {
-		if (p->type > FILE_NAMES_SIZE) {
+		if (p->type >= FILE_NAMES_SIZE) {
 			continue;
 		}
 		magic_file_names[p->type] = p->name;
@@ -905,8 +905,8 @@ static int parse(RMagic *ms, struct r_magic_entry **mentryp, ut32 *nmentryp, con
 				file_oomem (ms, sizeof (*mp) * maxmagic);
 				return -1;
 			}
-			(void)memset(&mp[*nmentryp], 0, sizeof (*mp) *
-			    ALLOC_INCR);
+			ut8 *p = (ut8*)&mp + *nmentryp;
+			(void)memset(p, 0, sizeof (*mp) * ALLOC_INCR);
 			*mentryp = mp;
 		}
 		me = &(*mentryp)[*nmentryp];

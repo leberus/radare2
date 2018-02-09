@@ -66,7 +66,6 @@ static int __close(RIODesc *fd) {
 	riom->url = NULL;
 	free (fd->data);
 	fd->data = NULL;
-	fd->state = R_IO_DESC_TYPE_CLOSED;
 	return 0;
 }
 
@@ -104,8 +103,8 @@ static RIODesc *__open(RIO *io, const char *pathname, int rw, int mode) {
 			mal->url = r_str_newf ("http://%s", pathname+8);
 			free (out);
 			free (url);
-			return r_io_desc_new (&r_io_plugin_r2web,
-				mal->fd, pathname, rw, mode, mal);
+			return r_io_desc_new (io, &r_io_plugin_r2web,
+				pathname, rw, mode, mal);
 		}
 		free (url);
 		free (mal);
@@ -114,18 +113,17 @@ static RIODesc *__open(RIO *io, const char *pathname, int rw, int mode) {
 	return NULL;
 }
 
-static int __system(RIO *io, RIODesc *fd, const char *command) {
+static char *__system(RIO *io, RIODesc *fd, const char *command) {
 	int code, rlen;
 	char *out;
-	int ret = 0;
 	char *url = r_str_newf ("%s/%s", rURL(fd), command);
 	out = r_socket_http_get (url, &code, &rlen);
-	if (out && rlen>0) {
+	if (out && rlen > 0) {
 		io->cb_printf ("%s", out);
 	}
 	free (out);
 	free (url);
-	return ret;
+	return NULL;
 }
 
 RIOPlugin r_io_plugin_r2web = {
@@ -142,7 +140,7 @@ RIOPlugin r_io_plugin_r2web = {
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_IO,
 	.data = &r_io_plugin_r2web,
 	.version = R2_VERSION

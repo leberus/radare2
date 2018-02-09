@@ -14,6 +14,7 @@ static csh cd = 0;
 static int disassemble(RAsm *a, RAsmOp *op, const ut8 *buf, int len) {
 	static int omode = -1;
 	static int obits = 32;
+	bool disp_hash = a->immdisp;
 	cs_insn* insn = NULL;
 	cs_mode mode = 0;
 	int ret, n = 0;
@@ -91,11 +92,13 @@ static int disassemble(RAsm *a, RAsmOp *op, const ut8 *buf, int len) {
 			insn->mnemonic,
 			insn->op_str[0]?" ":"",
 			insn->op_str);
-		r_str_rmch (op->buf_asm, '#');
+		if (!disp_hash) {
+			r_str_rmch (op->buf_asm, '#');
+		}
 	}
 	cs_free (insn, n);
 	beach:
-	//cs_close (&cd);
+	cs_close (&cd);
 	if (op) {
 		if (!op->buf_asm[0]) {
 			strcpy (op->buf_asm, "invalid");
@@ -128,7 +131,8 @@ static int assemble(RAsm *a, RAsmOp *op, const char *buf) {
 		opsize = o > 0? 4: 2; //(o&0x80 && ((o&0xe0)==0xe0))? 4: 2;
 		if (opsize == 4) {
 			if (a->big_endian) {
-				r_write_le32 (op->buf, opcode);
+				r_write_le16 (op->buf, opcode >> 16);
+				r_write_le16 (op->buf + 2, opcode & UT16_MAX);
 			} else {
 				r_write_be32 (op->buf, opcode);
 			}

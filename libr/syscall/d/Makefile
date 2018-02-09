@@ -12,6 +12,8 @@ F+= linux-mips-32
 F+= linux-sparc-32
 F+= darwin-x86-32
 F+= darwin-x86-64
+F+= darwin-arm-32
+F+= darwin-arm-64
 F+= netbsd-x86-32
 F+= freebsd-x86-32
 F+= openbsd-x86-32
@@ -37,18 +39,16 @@ all: ${SDB}
 
 compile: ${F_SDB}
 
-linux-x86-32.sdb: linux-x86-32
-
-%.sdb:%
+%.sdb:%.sdb.txt
 ifneq ($(SILENT),)
 	@echo "SDB $<"
-	@rm -f $<.sdb
-	@"${SHELL}" gen.sh < $< | ${SDB} $<.sdb =
-	@test -f $<.sdb
+	@rm -f $@
+	@"${SHELL}" gen.sh < $< | ${SDB} $@ =
+	@test -f $@
 else
-	rm -f $<.sdb
-	"${SHELL}" gen.sh < $< | ${SDB} $<.sdb =
-	test -f $<.sdb
+	rm -f $@
+	"${SHELL}" gen.sh < $< | ${SDB} $@ =
+	test -f $@
 endif
 
 clean:

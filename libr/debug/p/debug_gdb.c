@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2016 - pancake, defragger */
+/* radare - LGPL - Copyright 2009-2017 - pancake, defragger */
 
 #include <r_asm.h>
 #include <r_debug.h>
@@ -30,6 +30,14 @@ static int r_debug_gdb_step(RDebug *dbg) {
 	check_connection (dbg);
 	gdbr_step (desc, -1); // TODO handle thread specific step?
 	return true;
+}
+
+static RList* r_debug_gdb_threads(RDebug *dbg, int pid) {
+	RList *list;
+	if ((list = gdbr_threads_list (desc, pid))) {
+		list->free = (RListFree) &r_debug_pid_free;
+	}
+	return list;
 }
 
 static int r_debug_gdb_reg_read(RDebug *dbg, int type, ut8 *buf, int size) {
@@ -84,8 +92,175 @@ static int r_debug_gdb_reg_read(RDebug *dbg, int type, ut8 *buf, int size) {
 
 static RList *r_debug_gdb_map_get(RDebug* dbg) { //TODO
 	check_connection (dbg);
-	//TODO
-	return NULL;
+	if (desc->pid <= 0) {
+		return NULL;
+	}
+	RList *retlist = NULL;
+	if (desc->get_baddr) {
+		desc->get_baddr = false;
+		ut64 baddr;
+		if ((baddr = gdbr_get_baddr (desc)) != UINT64_MAX) {
+			if (!(retlist = r_list_new ())) {
+				return NULL;
+			}
+			RDebugMap *map;
+			if (!(map = r_debug_map_new ("", baddr, baddr,
+						     R_IO_READ | R_IO_EXEC, 0))) {
+				r_list_free (retlist);
+				return NULL;
+			}
+			r_list_append (retlist, map);
+			return retlist;
+		}
+	}
+
+	// Get file from GDB
+	char path[128];
+	ut8 *buf;
+	int ret;
+	// TODO don't hardcode buffer size, get from remote target
+	// (I think gdb doesn't do that, it just keeps reading till EOF)
+	// fstat info can get file size, but it doesn't work for /proc/pid/maps
+	ut64 buflen = 16384;
+	// If /proc/%d/maps is not valid for gdbserver, we return NULL, as of now
+	snprintf (path, sizeof (path) - 1, "/proc/%d/maps", desc->pid);
+
+#ifdef _MSC_VER
+#define GDB_FILE_OPEN_MODE (_S_IREAD | _S_IWRITE)
+#else
+#define GDB_FILE_OPEN_MODE (S_IRUSR | S_IWUSR | S_IXUSR)
+#endif
+
+	if (gdbr_open_file (desc, path, O_RDONLY, GDB_FILE_OPEN_MODE) < 0) {
+		return NULL;
+	}
+	if (!(buf = malloc (buflen))) {
+		gdbr_close_file (desc);
+		return NULL;
+	}
+	if ((ret = gdbr_read_file (desc, buf, buflen - 1)) <= 0) {
+		gdbr_close_file (desc);
+		free (buf);
+		return NULL;
+	}
+	buf[ret] = '\0';
+
+	// Get map list
+	int unk = 0, perm, i;
+	char *ptr, *pos_1;
+	size_t line_len;
+	char name[1024], region1[100], region2[100], perms[5];
+	RDebugMap *map = NULL;
+	region1[0] = region2[0] = '0';
+	region1[1] = region2[1] = 'x';
+	if (!(ptr = strtok ((char*) buf, "\n"))) {
+		gdbr_close_file (desc);
+		free (buf);
+		return NULL;
+	}
+	if (!(retlist = r_list_new ())) {
+		gdbr_close_file (desc);
+		free (buf);
+		return NULL;
+	}
+	while (ptr) {
+		ut64 map_start, map_end, offset;
+		bool map_is_shared = false;
+		line_len = strlen (ptr);
+		// maps files should not have empty lines
+		if (line_len == 0) {
+			break;
+		}
+		// We assume Linux target, for now, so -
+		// 7ffff7dda000-7ffff7dfd000 r-xp 00000000 08:05 265428 /usr/lib/ld-2.25.so
+		ret = sscanf (ptr, "%s %s %"PFMT64x" %*s %*s %[^\n]", &region1[2],
+			      perms, &offset, name);
+		if (ret == 3) {
+			name[0] = '\0';
+		} else if (ret != 4) {
+			eprintf ("%s: Unable to parse \"%s\"\nContent:\n%s\n",
+				 __func__, path, buf);
+			gdbr_close_file (desc);
+			free (buf);
+			r_list_free (retlist);
+			return NULL;
+		}
+		if (!(pos_1 = strchr (&region1[2], '-'))) {
+			ptr = strtok (NULL, "\n");
+			continue;
+		}
+		strncpy (&region2[2], pos_1 + 1, sizeof (region2) - 2 - 1);
+		if (!*name) {
+			snprintf (name, sizeof (name), "unk%d", unk++);
+		}
+		perm = 0;
+		for (i = 0; perms[i] && i < 5; i++) {
+			switch (perms[i]) {
+			case 'r': perm |= R_IO_READ; break;
+			case 'w': perm |= R_IO_WRITE; break;
+			case 'x': perm |= R_IO_EXEC; break;
+			case 'p': map_is_shared = false; break;
+			case 's': map_is_shared = true; break;
+			}
+		}
+		map_start = r_num_get (NULL, region1);
+		map_end = r_num_get (NULL, region2);
+		if (map_start == map_end || map_end == 0) {
+			eprintf ("%s: ignoring invalid map size: %s - %s\n",
+				 __func__, region1, region2);
+			ptr = strtok (NULL, "\n");
+			continue;
+		}
+		if (!(map = r_debug_map_new (name, map_start, map_end, perm, 0))) {
+			break;
+		}
+		map->offset = offset;
+		map->shared = map_is_shared;
+		map->file = strdup (name);
+		r_list_append (retlist, map);
+		ptr = strtok (NULL, "\n");
+	}
+	gdbr_close_file (desc);
+	free (buf);
+	return retlist;
+}
+
+static RList* r_debug_gdb_modules_get(RDebug *dbg) {
+	char *lastname = NULL;
+	RDebugMap *map;
+	RListIter *iter, *iter2;
+	RList *list, *last;
+	bool must_delete;
+	if (!(list = r_debug_gdb_map_get (dbg))) {
+		return NULL;
+	}
+	if (!(last = r_list_newf ((RListFree)r_debug_map_free))) {
+		r_list_free (list);
+		return NULL;
+	}
+	r_list_foreach_safe (list, iter, iter2, map) {
+		const char *file = map->file;
+		if (!map->file) {
+			file = map->file = strdup (map->name);
+		}
+		must_delete = true;
+		if (file && *file == '/') {
+			if (!lastname || strcmp (lastname, file)) {
+				must_delete = false;
+			}
+		}
+		if (must_delete) {
+			r_list_delete (list, iter);
+		} else {
+			r_list_append (last, map);
+			free (lastname);
+			lastname = strdup (file);
+		}
+	}
+	list->free = NULL;
+	free (lastname);
+	r_list_free (list);
+	return last;
 }
 
 static int r_debug_gdb_reg_write(RDebug *dbg, int type, const ut8 *buf, int size) {
@@ -105,7 +280,7 @@ static int r_debug_gdb_reg_write(RDebug *dbg, int type, const ut8 *buf, int size
 	free (r_reg_get_bytes (dbg->reg, type, &buflen));
 	// some implementations of the gdb protocol are acting weird.
 	// so winedbg is not able to write registers through the <G> packet
-	// and also it does not return the whole gdb register profile after
+	// and also it does not return the whole gdb register profile after\n"
 	// calling <g>
 	// so this workaround resizes the small register profile buffer
 	// to the whole set and fills the rest with 0
@@ -131,14 +306,36 @@ static int r_debug_gdb_reg_write(RDebug *dbg, int type, const ut8 *buf, int size
 
 static int r_debug_gdb_continue(RDebug *dbg, int pid, int tid, int sig) {
 	check_connection (dbg);
-	gdbr_continue (desc, -1);
-	return true;
+	gdbr_continue (desc, pid, -1, sig); // Continue all threads
+	if (desc->stop_reason.is_valid && desc->stop_reason.thread.present) {
+		//if (desc->tid != desc->stop_reason.thread.tid) {
+		//	eprintf ("thread id (%d) in reason differs from current thread id (%d)\n", dbg->pid, dbg->tid);
+		//}
+		desc->tid = desc->stop_reason.thread.tid;
+	}
+	return desc->tid;
 }
 
-static int r_debug_gdb_wait(RDebug *dbg, int pid) {
+static RDebugReasonType r_debug_gdb_wait(RDebug *dbg, int pid) {
 	check_connection (dbg);
-	/* do nothing */
-	return true;
+	if (!desc->stop_reason.is_valid) {
+		if (gdbr_stop_reason (desc) < 0) {
+			dbg->reason.type = R_DEBUG_REASON_UNKNOWN;
+			return R_DEBUG_REASON_UNKNOWN;
+		}
+	}
+	if (desc->stop_reason.thread.present) {
+		dbg->reason.tid = desc->stop_reason.thread.tid;
+		dbg->pid = desc->stop_reason.thread.pid;
+		dbg->tid = desc->stop_reason.thread.tid;
+		if (dbg->pid != desc->pid || dbg->tid != desc->tid) {
+			//eprintf ("= attach %d %d\n", dbg->pid, dbg->tid);
+			gdbr_select (desc, dbg->pid, dbg->tid);
+		}
+	}
+	dbg->reason.signum = desc->stop_reason.signum;
+	dbg->reason.type = desc->stop_reason.reason;
+	return desc->stop_reason.reason;
 }
 
 static int r_debug_gdb_attach(RDebug *dbg, int pid) {
@@ -153,13 +350,13 @@ static int r_debug_gdb_attach(RDebug *dbg, int pid) {
 			support_hw_bp = UNKNOWN;
 			int arch = r_sys_arch_id (dbg->arch);
 			int bits = dbg->anal->bits;
-			if (( desc = &g->desc ))
+			desc = &g->desc;
 			switch (arch) {
 			case R_SYS_ARCH_X86:
 				if (bits == 16 || bits == 32) {
-					gdbr_set_architecture (&g->desc, X86_32);
+					gdbr_set_architecture (desc, "x86", 32);
 				} else if (bits == 64) {
-					gdbr_set_architecture (&g->desc, X86_64);
+					gdbr_set_architecture (desc, "x86", 64);
 				} else {
 					eprintf ("Not supported register %s %d profile\n", dbg->arch, bits);
 					return false;
@@ -170,9 +367,9 @@ static int r_debug_gdb_attach(RDebug *dbg, int pid) {
 				break;
 			case R_SYS_ARCH_ARM:
 				if (bits == 16 || bits == 32) {
-					gdbr_set_architecture (&g->desc, ARM_32);
+					gdbr_set_architecture (desc, "arm", 32);
 				} else if (bits == 64) {
-					gdbr_set_architecture (&g->desc, ARM_64);
+					gdbr_set_architecture (desc, "arm", 64);
 				} else {
 					eprintf ("Not supported register %s %d profile\n", dbg->arch, bits);
 					return false;
@@ -180,7 +377,7 @@ static int r_debug_gdb_attach(RDebug *dbg, int pid) {
 				break;
 			case R_SYS_ARCH_LM32:
 				if (bits == 32) {
-					gdbr_set_architecture(&g->desc, LM32);
+					gdbr_set_architecture(desc, "lm32", 32);
 				} else {
 					eprintf ("Not supported register %s %d profile\n", dbg->arch, bits);
 					return false;
@@ -188,20 +385,14 @@ static int r_debug_gdb_attach(RDebug *dbg, int pid) {
 				break;
 			case R_SYS_ARCH_MIPS:
 				if (bits == 32 || bits == 64) {
-					gdbr_set_architecture (&g->desc, MIPS);
+					gdbr_set_architecture (desc, "mips", bits);
 				} else {
 					eprintf ("Not supported register %s %d profile\n", dbg->arch, bits);
 					return false;
 				}
 				break;
 			case R_SYS_ARCH_AVR:
-				if (bits == 16) {
-					gdbr_set_architecture (&g->desc, AVR);
-				} else {
-					gdbr_set_architecture (&g->desc, AVR);
-					//eprintf ("Not supported register profile\n");
-					//return false;
-				}
+				gdbr_set_architecture (desc, "avr", 16);
 				break;
 			}
 		} else {
@@ -212,15 +403,19 @@ static int r_debug_gdb_attach(RDebug *dbg, int pid) {
 }
 
 static int r_debug_gdb_detach(RDebug *dbg, int pid) {
-	gdbr_disconnect (desc);
-	free (reg_buf);
-	return true;
+	if (pid <= 0 || !desc->stub_features.multiprocess) {
+		return gdbr_detach (desc);
+	}
+	return gdbr_detach_pid (desc, pid);
 }
 
 static const char *r_debug_gdb_reg_profile(RDebug *dbg) {
 	int arch = r_sys_arch_id (dbg->arch);
 	int bits = dbg->anal->bits;
 	check_connection (dbg);
+	if (desc && desc->target.valid && desc->target.regprofile) {
+		return strdup (desc->target.regprofile);
+	}
 	switch (arch) {
 	case R_SYS_ARCH_X86:
 		if (bits == 16 || bits == 32) {
@@ -231,7 +426,7 @@ static const char *r_debug_gdb_reg_profile(RDebug *dbg) {
 				"=A0	eax\n"
 				"=A1	ebx\n"
 				"=A2	ecx\n"
-				"=A3	edi\n"
+				"=A3	edx\n"
 				"=SN	oeax\n"
 				"gpr	eax	.32	0	0\n"
 				"gpr	ecx	.32	4	0\n"
@@ -249,14 +444,14 @@ static const char *r_debug_gdb_reg_profile(RDebug *dbg) {
 				"seg	es	.32	52	0\n"
 				"seg	fs	.32	56	0\n"
 				"seg	gs	.32	60	0\n"
-				"gpr	st0	.80	64	0\n"
-				"gpr	st1	.80	74	0\n"
-				"gpr	st2	.80	84	0\n"
-				"gpr	st3	.80	94	0\n"
-				"gpr	st4	.80	104	0\n"
-				"gpr	st5	.80	114	0\n"
-				"gpr	st6	.80	124	0\n"
-				"gpr	st7	.80	134	0\n"
+				"fpu	st0	.80	64	0\n"
+				"fpu	st1	.80	74	0\n"
+				"fpu	st2	.80	84	0\n"
+				"fpu	st3	.80	94	0\n"
+				"fpu	st4	.80	104	0\n"
+				"fpu	st5	.80	114	0\n"
+				"fpu	st6	.80	124	0\n"
+				"fpu	st7	.80	134	0\n"
 				"gpr	fctrl	.32	144	0\n"
 				"gpr	fstat	.32	148	0\n"
 				"gpr	ftag	.32	152	0\n"
@@ -312,14 +507,14 @@ static const char *r_debug_gdb_reg_profile(RDebug *dbg) {
 				"seg	es	.32	152	0\n"
 				"seg	fs	.32	156	0\n"
 				"seg	gs	.32	160	0\n"
-				"gpr	st0	.80	164	0\n"
-				"gpr	st1	.80	174	0\n"
-				"gpr	st2	.80	184	0\n"
-				"gpr	st3	.80	194	0\n"
-				"gpr	st4	.80	204	0\n"
-				"gpr	st5	.80	214	0\n"
-				"gpr	st6	.80	224	0\n"
-				"gpr	st7	.80	234	0\n"
+				"fpu	st0	.80	164	0\n"
+				"fpu	st1	.80	174	0\n"
+				"fpu	st2	.80	184	0\n"
+				"fpu	st3	.80	194	0\n"
+				"fpu	st4	.80	204	0\n"
+				"fpu	st5	.80	214	0\n"
+				"fpu	st6	.80	224	0\n"
+				"fpu	st7	.80	234	0\n"
 				"gpr	fctrl	.32	244	0\n"
 				"gpr	fstat	.32	248	0\n"
 				"gpr	ftag	.32	252	0\n"
@@ -381,10 +576,16 @@ static const char *r_debug_gdb_reg_profile(RDebug *dbg) {
 			return strdup (
 			"=PC	pc\n"
 			"=SP	sp\n"
-			"=A0	r0\n"
-			"=A1	r1\n"
-			"=A2	r2\n"
-			"=A3	r3\n"
+			"=BP	x29\n"
+			"=A0	x0\n"
+			"=A1	x1\n"
+			"=A2	x2\n"
+			"=A3	x3\n"
+			"=ZF	zf\n"
+			"=SF	nf\n"
+			"=OF	vf\n"
+			"=CF	cf\n"
+			"=SN	x8\n"
 			"gpr	x0	.64	0	0\n"
 			"gpr	x1	.64	8	0\n"
 			"gpr	x2	.64	16	0\n"
@@ -520,6 +721,7 @@ static const char *r_debug_gdb_reg_profile(RDebug *dbg) {
 #endif
 			);
 		}
+		break;
 	case R_SYS_ARCH_SH:
 		return strdup (
 			"=PC    pc\n"
@@ -548,6 +750,7 @@ static const char *r_debug_gdb_reg_profile(RDebug *dbg) {
 			"gpr	mach	.32	80	0\n"
 			"gpr	macl	.32	84	0\n"
 		);
+		break;
 	case R_SYS_ARCH_LM32:
 		return strdup (
 			"=PC    PC\n"
@@ -593,6 +796,7 @@ static const char *r_debug_gdb_reg_profile(RDebug *dbg) {
 			"gpr	IM	.32	148	0\n"
 			"gpr	IP	.32	152	0\n"
 		);
+		break;
 	case R_SYS_ARCH_MIPS:
 		return strdup (
 			"=PC    pc\n"
@@ -714,23 +918,24 @@ static const char *r_debug_gdb_reg_profile(RDebug *dbg) {
 			"gpr	pc	.32	35	0\n"
 	/*		"gpr	pc	.32	39	0\n" */
 	);
-
 	}
 	return NULL;
 }
 
-static int r_debug_gdb_breakpoint (RBreakpointItem *bp, int set, void *user) {
+static int r_debug_gdb_breakpoint (void *bp, RBreakpointItem *b, bool set) {
 	int ret;
-	if (!bp) return false;
+	if (!b) {
+		return false;
+	}
 	// TODO handle rwx and conditions
 	if (set)
-		ret = bp->hw?
-			gdbr_set_hwbp (desc, bp->addr, ""):
-			gdbr_set_bp (desc, bp->addr, "");
+		ret = b->hw?
+			gdbr_set_hwbp (desc, b->addr, ""):
+			gdbr_set_bp (desc, b->addr, "");
 	else
-		ret = bp->hw?
-			gdbr_remove_hwbp (desc, bp->addr):
-			gdbr_remove_bp (desc, bp->addr);
+		ret = b->hw?
+			gdbr_remove_hwbp (desc, b->addr):
+			gdbr_remove_bp (desc, b->addr);
 	return !ret;
 }
 
@@ -740,6 +945,57 @@ static bool r_debug_gdb_kill(RDebug *dbg, int pid, int tid, int sig) {
 		return gdbr_kill (desc);
 	}
 	return true;
+}
+
+static int r_debug_gdb_select(int pid, int tid) {
+	if (!desc) {
+		return false;
+	}
+	return gdbr_select (desc, pid, tid) >= 0;
+}
+
+static RDebugInfo* r_debug_gdb_info(RDebug *dbg, const char *arg) {
+	RDebugInfo *rdi;
+	if (!(rdi = R_NEW0 (RDebugInfo))) {
+		return NULL;
+	}
+	RList *th_list;
+	bool list_alloc = false;
+	if (dbg->threads) {
+		th_list = dbg->threads;
+	} else {
+		th_list = r_debug_gdb_threads (dbg, dbg->pid);
+		list_alloc = true;
+	}
+	RDebugPid *th;
+	RListIter *it;
+	bool found = false;
+	r_list_foreach (th_list, it, th) {
+		if (th->pid == dbg->pid) {
+			found = true;
+			break;
+		}
+	}
+	rdi->pid = dbg->pid;
+	rdi->tid = dbg->tid;
+	rdi->exe = gdbr_exec_file_read (desc, dbg->pid);
+	rdi->status = found ? th->status : R_DBG_PROC_STOP;
+	rdi->uid = found ? th->uid : -1;
+	rdi->gid = found ? th->gid : -1;
+	if (gdbr_stop_reason (desc) >= 0) {
+		eprintf ("signal: %d\n", desc->stop_reason.signum);
+		rdi->signum = desc->stop_reason.signum;
+	}
+	if (list_alloc) {
+		r_list_free (th_list);
+	}
+	return rdi;
+}
+
+#include "native/bt.c"
+
+static RList* r_debug_gdb_frames(RDebug *dbg, ut64 at) {
+	return r_debug_native_frames (dbg, at);
 }
 
 RDebugPlugin r_debug_plugin_gdb = {
@@ -752,20 +1008,25 @@ RDebugPlugin r_debug_plugin_gdb = {
 	.cont = r_debug_gdb_continue,
 	.attach = &r_debug_gdb_attach,
 	.detach = &r_debug_gdb_detach,
+	.threads = &r_debug_gdb_threads,
 	.canstep = 1,
 	.wait = &r_debug_gdb_wait,
 	.map_get = r_debug_gdb_map_get,
+	.modules_get = r_debug_gdb_modules_get,
 	.breakpoint = &r_debug_gdb_breakpoint,
 	.reg_read = &r_debug_gdb_reg_read,
 	.reg_write = &r_debug_gdb_reg_write,
 	.reg_profile = (void *)r_debug_gdb_reg_profile,
 	.kill = &r_debug_gdb_kill,
+	.info = &r_debug_gdb_info,
+	.select = &r_debug_gdb_select,
+	.frames = &r_debug_gdb_frames,
 	//.bp_write = &r_debug_gdb_bp_write,
 	//.bp_read = &r_debug_gdb_bp_read,
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_DBG,
 	.data = &r_debug_plugin_gdb,
 	.version = R2_VERSION

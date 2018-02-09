@@ -10,6 +10,7 @@ files=[
 'base91.c',
 'bdiff.c',
 'big.c',
+'binheap.c',
 'bitmap.c',
 'btree.c',
 'buf.c',
@@ -38,18 +39,22 @@ files=[
 'print.c',
 'prof.c',
 'punycode.c',
+'qrcode.c',
 'queue.c',
 'r_asn1.c',
 'r_pkcs7.c',
 'r_x509.c',
 'randomart.c',
 'range.c',
+'rbtree.c',
 'sandbox.c',
 'signal.c',
+'skiplist.c',
 'slist.c',
 'spaces.c',
 'stack.c',
 'str.c',
+'str_trim.c',
 'strbuf.c',
 'strpool.c',
 'sys.c',
@@ -65,6 +70,9 @@ files=[
 'uleb128.c',
 'unum.c',
 'utf8.c',
+'utf16.c',
+'utf32.c',
+'vector.c',
 'w32-sys.c',
 'zip.c',
 'regex/regcomp.c',
@@ -73,15 +81,15 @@ files=[
 ]
 
 incdir = '../include'
-r_util = shared_library('r_util', files,
+
+r_util = library('r_util', files,
   include_directories: [platform_inc, include_directories([
 	'../../shlr/zip/include']
   )],
   dependencies: [ldl, pth, utl],
   objects: [
-    libr2sdb.extract_all_objects(),
+	libr2sdb.extract_all_objects(),
 	libr2zip.extract_all_objects()
   ],
   install: true
 )
-

@@ -120,7 +120,6 @@ static int __close(RIODesc *fd) {
 		return -1;
 	r2p_free (fd->data);
 	fd->data = NULL;
-	fd->state = R_IO_DESC_TYPE_CLOSED;
 	return 0;
 }
 
@@ -142,30 +141,33 @@ static RIODesc *__open(RIO *io, const char *pathname, int rw, int mode) {
 	if (__check (io, pathname, 0)) {
 		r2p = r2p_open (pathname + 9);
 	}
-	return r2p? r_io_desc_new (&r_io_plugin_r2pipe,
-		r2p->child, pathname, rw, mode, r2p): NULL;
+	return r2p? r_io_desc_new (io, &r_io_plugin_r2pipe,
+		pathname, rw, mode, r2p): NULL;
 }
 
-static int __system(RIO *io, RIODesc *fd, const char *msg) {
+static char *__system(RIO *io, RIODesc *fd, const char *msg) {
 	char fmt[4096];
 	int rv, rescount = -1;
 	char *res, *r;
-	if (!fd || !fd->data)
-		return -1;
-	snprintf (fmt, sizeof (fmt),
-		"{\"op\":\"system\",\"cmd\":\"%s\"}", msg);
+	if (!fd || !fd->data) {
+		return NULL;
+	}
+	snprintf (fmt, sizeof (fmt), "{\"op\":\"system\",\"cmd\":\"%s\"}", msg);
 	rv = r2p_write (R2P (fd), fmt);
-	if (rv <1) {
+	if (rv < 1) {
 		eprintf ("r2p_write: error\n");
-		return -1;
+		return NULL;
 	}
 	res = r2p_read (R2P (fd));
 	//eprintf ("%s\n", res);
 	/* TODO: parse json back */
 	r = strstr (res, "result");
-	if (r) { rescount = atoi (r+6+1); }
+	if (r) {
+		rescount = atoi (r + 6 + 1);
+		eprintf ("RESULT %d\n", rescount);
+	}
 	free (res);
-	return rescount;
+	return NULL;
 }
 
 RIOPlugin r_io_plugin_r2pipe = {
@@ -182,7 +184,7 @@ RIOPlugin r_io_plugin_r2pipe = {
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_IO,
 	.data = &r_io_plugin_r2pipe,
 	.version = R2_VERSION

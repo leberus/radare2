@@ -96,6 +96,14 @@ CPU_CONST cpu_memsize_m640_m1280m_m1281_m2560_m2561[] = {
 	{ NULL, 0, 0, 0 },
 };
 
+CPU_CONST cpu_memsize_xmega128a4u[] = {
+	{ "eeprom_size", CPU_CONST_PARAM,  0x800, sizeof (ut32) },
+	{ "io_size",     CPU_CONST_PARAM, 0x1000, sizeof (ut32) },
+	{ "sram_start",  CPU_CONST_PARAM,  0x800, sizeof (ut32) },
+	{ "sram_size",   CPU_CONST_PARAM, 0x2000, sizeof (ut32) },
+	{ NULL, 0, 0, 0 },
+};
+
 CPU_CONST cpu_pagesize_5_bits[] = {
 	{ "page_size", CPU_CONST_PARAM, 5, sizeof (ut8) },
 	{ NULL, 0, 0, 0 },
@@ -114,6 +122,15 @@ CPU_MODEL cpu_models[] = {
 			cpu_pagesize_7_bits,
 			NULL
 		},
+	},
+	{
+		.model = "ATxmega128a4u", .pc = 17,
+		.consts = {
+			cpu_reg_common,
+			cpu_memsize_xmega128a4u,
+			cpu_pagesize_7_bits,
+			NULL
+		}
 	},
 	{ .model = "ATmega1280",  .pc = 16, .inherit = "ATmega640" },
 	{ .model = "ATmega1281",  .pc = 16, .inherit = "ATmega640" },
@@ -292,8 +309,8 @@ static void __generic_add_update_flags(RAnalOp *op, char t_d, ut64 v_d, char t_r
 
 	d_strbuf = r_strbuf_new (NULL);
 	rk_strbuf = r_strbuf_new (NULL);
-	r_strbuf_setf (d_strbuf,  t_d  == 'r' ? "r%d" : "%" PFMT64x, v_d);
-	r_strbuf_setf (rk_strbuf, t_rk == 'r' ? "r%d" : "%" PFMT64x, v_rk);
+	r_strbuf_setf (d_strbuf,  t_d  == 'r' ? "r%d" : "%" PFMT64d, v_d);
+	r_strbuf_setf (rk_strbuf, t_rk == 'r' ? "r%d" : "%" PFMT64d, v_rk);
 
 	d = r_strbuf_get(d_strbuf);
 	rk = r_strbuf_get(rk_strbuf);
@@ -332,8 +349,8 @@ static void __generic_sub_update_flags(RAnalOp *op, char t_d, ut64 v_d, char t_r
 
 	d_strbuf = r_strbuf_new (NULL);
 	rk_strbuf = r_strbuf_new (NULL);
-	r_strbuf_setf (d_strbuf,  t_d  == 'r' ? "r%d" : "%" PFMT64x, v_d);
-	r_strbuf_setf (rk_strbuf, t_rk == 'r' ? "r%d" : "%" PFMT64x, v_rk);
+	r_strbuf_setf (d_strbuf,  t_d  == 'r' ? "r%d" : "%" PFMT64d, v_d);
+	r_strbuf_setf (rk_strbuf, t_rk == 'r' ? "r%d" : "%" PFMT64d, v_rk);
 
 	d = r_strbuf_get(d_strbuf);
 	rk = r_strbuf_get(rk_strbuf);
@@ -420,7 +437,7 @@ INST_HANDLER (and) {	// AND Rd, Rr
 INST_HANDLER (andi) {	// ANDI Rd, K
 			// CBR Rd, K (= ANDI Rd, 1-K)
 	int d = ((buf[0] >> 4) & 0xf) + 16;
-	int k = (buf[1] & 0xf0) | (buf[0] & 0x0f);
+	int k = ((buf[1] & 0x0f) << 4) | (buf[0] & 0x0f);
 	ESIL_A ("%d,r%d,&,", k, d);				// 0: Rd & Rr
 	__generic_bitop_flags (op);				// up flags
 	ESIL_A ("r%d,=,", d);					// Rd = Result
@@ -547,9 +564,9 @@ INST_HANDLER (cbi) {	// CBI A, b
 }
 
 INST_HANDLER (com) {	// COM Rd
-	int r = ((buf[0] >> 4) & 0x0f) | ((buf[0] & 1) << 4);
+	int r = ((buf[0] >> 4) & 0x0f) | ((buf[1] & 1) << 4);
 
-	ESIL_A ("r%d,0xff,^,1,+,0xff,&,r%d,=,", r, r);		// Rd = 0-Rd
+	ESIL_A ("r%d,0xff,-,0xff,&,r%d,=,", r, r);		// Rd = 0xFF-Rd
 								// FLAGS:
 	ESIL_A ("0,cf,=,");					// C
 	__generic_bitop_flags (op);				// ...rest...
@@ -566,7 +583,7 @@ INST_HANDLER (cpc) {	// CPC Rd, Rr
 	int r = (buf[0]        & 0x0f) | ((buf[1] << 3) & 0x10);
 	int d = ((buf[0] >> 4) & 0x0f) | ((buf[1] << 4) & 0x10);
 
-	ESIL_A ("cf,r%d,-,r%d,-,", r, d);		// Rd - Rr - C
+	ESIL_A ("cf,r%d,+,r%d,-,", r, d);		// Rd - Rr - C
 	__generic_sub_update_flags_rr (op, d, r, 1);	// FLAGS (carry)
 }
 
@@ -574,12 +591,12 @@ INST_HANDLER (cpi) { // CPI Rd, K
 	int d = ((buf[0] >> 4) & 0xf) + 16;
 	int k = (buf[0] & 0xf) | ((buf[1] & 0xf) << 4);
 	ESIL_A ("%d,r%d,-,", k, d);			// Rd - k
-	__generic_sub_update_flags_rr (op, d, k, 0);	// FLAGS (carry)
+	__generic_sub_update_flags_rk (op, d, k, 0);	// FLAGS (carry)
 }
 
 INST_HANDLER (cpse) {	// CPSE Rd, Rr
 	int r = (buf[0] & 0xf) | ((buf[1] & 0x2) << 3);
-	int d = ((buf[0] & 0xf) >> 4) | ((buf[1] & 0x1) << 4);
+	int d = ((buf[0] >> 4) & 0xf) | ((buf[1] & 0x1) << 4);
 	RAnalOp next_op;
 
 	// calculate next instruction size (call recursively avr_op_analyze)
@@ -841,18 +858,18 @@ INST_HANDLER (ldd) {	// LD Rd, Y	LD Rd, Z
 		op, "ram",
 		buf[0] & 0x8 ? 'y' : 'z',	// index register Y/Z
 		0,				// no use RAMP* registers
-		!(buf[1] & 0x1)
+		!(buf[1] & 0x10)
 			? 0			// no increment
 			: buf[0] & 0x1
 				? 1		// post incremented
 				: -1,		// pre decremented
-		!(buf[1] & 0x1) ? offset : 0,	// offset or not offset
+		!(buf[1] & 0x10) ? offset : 0,	// offset or not offset
 		0);				// load operation (!st)
 	// load register
 	ESIL_A ("r%d,=,", ((buf[1] & 1) << 4) | ((buf[0] >> 4) & 0xf));
 	// cycles
 	op->cycles =
-		(buf[1] & 0x1) == 0
+		(buf[1] & 0x10) == 0
 			? (!offset ? 1 : 3)		// LDD
 			: (buf[0] & 0x3) == 0
 				? 1			// LD Rd, X
@@ -878,6 +895,16 @@ INST_HANDLER (lds) {	// LDS Rd, k
 	// load value from RAMPD:k
 	__generic_ld_st (op, "ram", 0, 1, 0, k, 0);
 	ESIL_A ("r%d,=,", d);
+}
+
+INST_HANDLER (sts) {	// STS k, Rr
+	int r = ((buf[0] >> 4) & 0xf) | ((buf[1] & 0x1) << 4);
+	int k = (buf[3] << 8) | buf[2];
+
+	ESIL_A ("r%d,", r);
+	__generic_ld_st (op, "ram", 0, 1, 0, k, 1);
+
+	op->cycles = 2;
 }
 
 INST_HANDLER (lds16) {	// LDS Rd, k
@@ -1104,8 +1131,8 @@ INST_HANDLER (rjmp) {	// RJMP k
 
 INST_HANDLER (ror) {	// ROR Rd
 	int d = ((buf[0] >> 4) & 0x0f) | ((buf[1] << 4) & 0x10);
-	ESIL_A ("1,r%d,>>,8,cf,<<,|,", d);		// 0: (Rd>>1) | (cf<<8)
-	ESIL_A ("r%d,1,&,cf,=,");			// C
+	ESIL_A ("1,r%d,>>,7,cf,<<,|,", d);		// 0: (Rd>>1) | (cf<<7)
+	ESIL_A ("r%d,1,&,cf,=,", d);			// C
 	ESIL_A ("0,RPICK,!,zf,=,");			// Z
 	ESIL_A ("0,RPICK,0x80,&,!,!,nf,=,");		// N
 	ESIL_A ("nf,cf,^,vf,=,");			// V
@@ -1114,10 +1141,10 @@ INST_HANDLER (ror) {	// ROR Rd
 }
 
 INST_HANDLER (sbc) {	// SBC Rd, Rr
-	int r = (buf[1] & 0x0f) | ((buf[0] & 0x2) >> 1);
-	int d = ((buf[1] >> 4) & 0xf) | (buf[0] & 0x1);
+	int r = (buf[0] & 0x0f) | ((buf[1] & 0x2) << 3);
+	int d = ((buf[0] >> 4) & 0xf) | ((buf[1] & 0x1) << 4);
 
-	ESIL_A ("cf,r%d,-,r%d,-,", r, d);		// 0: (Rd-Rr-C)
+	ESIL_A ("cf,r%d,+,r%d,-,", r, d);		// 0: (Rd-Rr-C)
 	__generic_sub_update_flags_rr (op, d, r, 1);	// FLAGS (carry)
 	ESIL_A ("r%d,=,", d);				// Rd = Result
 }
@@ -1335,12 +1362,12 @@ INST_HANDLER (std) {	// ST Y, Rr	ST Z, Rr
 		op, "ram",
 		buf[0] & 0x8 ? 'y' : 'z',	// index register Y/Z
 		0,				// no use RAMP* registers
-		!(buf[1] & 0x1)
+		!(buf[1] & 0x10)
 			? 0			// no increment
 			: buf[0] & 0x1
 				? 1		// post incremented
 				: -1,		// pre decremented
-		!(buf[1] & 0x1)
+		!(buf[1] & 0x10)
 			? (buf[1] & 0x20)	// offset
 			| ((buf[1] & 0xc) << 1)
 			| (buf[0] & 0x7)
@@ -1408,13 +1435,14 @@ OPCODE_DESC opcodes[] = {
 	INST_DECL (ld,     0xfe0f, 0x900d, 0,      2,   LOAD   ), // LD Rd, X+
 	INST_DECL (ld,     0xfe0f, 0x900e, 0,      2,   LOAD   ), // LD Rd, -X
 	INST_DECL (lds,    0xfe0f, 0x9000, 0,      4,   LOAD   ), // LDS Rd, k
+	INST_DECL (sts,    0xfe0f, 0x9200, 2,      4,   STORE  ), // STS k, Rr
 	INST_DECL (lpm,    0xfe0f, 0x9004, 3,      2,   LOAD   ), // LPM Rd, Z
 	INST_DECL (lpm,    0xfe0f, 0x9005, 3,      2,   LOAD   ), // LPM Rd, Z+
 	INST_DECL (lsr,    0xfe0f, 0x9406, 1,      2,   SHR    ), // LSR Rd
 	INST_DECL (neg,    0xfe0f, 0x9401, 2,      2,   SUB    ), // NEG Rd
-	INST_DECL (pop,    0xfe0f, 0x900f, 2,      2,   POP    ), // PUSH Rr
+	INST_DECL (pop,    0xfe0f, 0x900f, 2,      2,   POP    ), // POP Rd
 	INST_DECL (push,   0xfe0f, 0x920f, 0,      2,   PUSH   ), // PUSH Rr
-	INST_DECL (ror,    0xfe0f, 0x9407, 1,      2,   SAR    ), // PUSH Rr
+	INST_DECL (ror,    0xfe0f, 0x9407, 1,      2,   SAR    ), // ROR Rd
 	INST_DECL (st,     0xfe0f, 0x920c, 2,      2,   STORE  ), // ST X, Rr
 	INST_DECL (st,     0xfe0f, 0x920d, 0,      2,   STORE  ), // ST X+, Rr
 	INST_DECL (st,     0xfe0f, 0x920e, 0,      2,   STORE  ), // ST -X, Rr
@@ -1429,8 +1457,8 @@ OPCODE_DESC opcodes[] = {
 	INST_DECL (sbrx,   0xfe08, 0xfe00, 2,      2,   CJMP   ), // SBRS Rr, b
 	INST_DECL (ldd,    0xfe07, 0x9001, 0,      2,   LOAD   ), // LD Rd, Y/Z+
 	INST_DECL (ldd,    0xfe07, 0x9002, 0,      2,   LOAD   ), // LD Rd, -Y/Z
-	INST_DECL (std,    0xfe07, 0x9201, 0,      2,   STORE  ), // LD Y/Z+, Rr
-	INST_DECL (std,    0xfe07, 0x9202, 0,      2,   STORE  ), // LD -Y/Z, Rr
+	INST_DECL (std,    0xfe07, 0x9201, 0,      2,   STORE  ), // ST Y/Z+, Rr
+	INST_DECL (std,    0xfe07, 0x9202, 0,      2,   STORE  ), // ST -Y/Z, Rr
 	INST_DECL (adc,    0xfc00, 0x1c00, 1,      2,   ADD    ), // ADC Rd, Rr
 	INST_DECL (add,    0xfc00, 0x0c00, 1,      2,   ADD    ), // ADD Rd, Rr
 	INST_DECL (and,    0xfc00, 0x2000, 1,      2,   AND    ), // AND Rd, Rr
@@ -1446,7 +1474,7 @@ OPCODE_DESC opcodes[] = {
 	INST_DECL (sbc,    0xfc00, 0x0800, 1,      2,   SUB    ), // SBC Rd, Rr
 	INST_DECL (sub,    0xfc00, 0x1800, 1,      2,   SUB    ), // SUB Rd, Rr
 	INST_DECL (in,     0xf800, 0xb000, 1,      2,   IO     ), // IN Rd, A
-	INST_DECL (lds16,  0xf800, 0xa000, 1,      2,   LOAD   ), // LDS Rd, k
+	//INST_DECL (lds16,  0xf800, 0xa000, 1,      2,   LOAD   ), // LDS Rd, k
 	INST_DECL (out,    0xf800, 0xb800, 1,      2,   IO     ), // OUT A, Rr
 	INST_DECL (andi,   0xf000, 0x7000, 1,      2,   AND    ), // ANDI Rd, K
 	INST_DECL (cpi,    0xf000, 0x3000, 1,      2,   CMP    ), // CPI Rd, K
@@ -1457,7 +1485,7 @@ OPCODE_DESC opcodes[] = {
 	INST_DECL (sbci,   0xf000, 0x4000, 1,      2,   SUB    ), // SBC Rd, Rr
 	INST_DECL (subi,   0xf000, 0x5000, 1,      2,   SUB    ), // SUBI Rd, Rr
 	INST_DECL (ldd,    0xd200, 0x8000, 0,      2,   LOAD   ), // LD Rd, Y/Z+q
-	INST_DECL (std,    0xd200, 0x8200, 0,      2,   STORE  ), // LD Y/Z+q, Rr
+	INST_DECL (std,    0xd200, 0x8200, 0,      2,   STORE  ), // ST Y/Z+q, Rr
 
 	INST_LAST
 };
@@ -1592,7 +1620,7 @@ static int avr_custom_des (RAnalEsil *esil) {
 	if (des_round != desctx.round) {
 		desctx.round = des_round;
 	}
-	
+
 	if (!desctx.round) {
 		int i;
 		//generating all round keys
@@ -1830,6 +1858,10 @@ RAMPX, RAMPY, RAMPZ, RAMPD and EIND:
 		"gpr	r31	.8	31	0\n"
 
 // 16 bit overlapped registers for 16 bit math
+		"gpr	r17:r16	.16	16	0\n"
+		"gpr	r19:r18	.16	18	0\n"
+		"gpr	r21:r20	.16	20	0\n"
+		"gpr	r23:r22	.16	22	0\n"
 		"gpr	r25:r24	.16	24	0\n"
 		"gpr	r27:r26	.16	26	0\n"
 		"gpr	r29:r28	.16	28	0\n"

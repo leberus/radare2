@@ -66,7 +66,7 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ 0, "lsl",  "1 = 2 << 3"},
 		{ 0, "lsr",  "1 = 2 >> 3"},
 		{ 0, "mov",  "1 = 2"},
-		{ 0, "mvn",  "1 = 2"},
+		{ 0, "mvn",  "1 = ~2"},
 		{ 0, "movz",  "1 = 2"},
 		{ 0, "movk",  "1 = 2"},
 		{ 0, "movn",  "1 = 2"},
@@ -235,6 +235,7 @@ static int parse(RParse *p, const char *data, char *str) {
 }
 
 static bool varsub(RParse *p, RAnalFunction *f, ut64 addr, int oplen, char *data, char *str, int len) {
+	RList *spargs, *bpargs, *regargs;
 	RAnalVar *var;
 	RListIter *iter;
 	char *oldstr, *newstr;
@@ -242,7 +243,6 @@ static bool varsub(RParse *p, RAnalFunction *f, ut64 addr, int oplen, char *data
 	if (!tstr) {
 		return false;
 	}
-	RList *spargs, *bpargs, *regargs;
 
 	if (!p->varlist) {
 		free (tstr);
@@ -254,7 +254,8 @@ static bool varsub(RParse *p, RAnalFunction *f, ut64 addr, int oplen, char *data
 			rip += 4;
 			char *tstr_new, *ripend = strchr (rip, ']');
 			const char *neg = strchr (rip, '-');
-			ut64 repl_num = (2 * oplen) + addr;
+			ut64 off = (oplen == 2 || strstr (tstr, ".w")) ? 4 : 8;
+			ut64 repl_num = (addr + off) & ~3;
 			if (!ripend) {
 				ripend = "]";
 			}
@@ -315,7 +316,7 @@ static bool varsub(RParse *p, RAnalFunction *f, ut64 addr, int oplen, char *data
 			free (oldstr);
 			break;
 		}
-		free(oldstr);
+		free (oldstr);
 	}
 	r_list_foreach (spargs, iter, var) {
 		if (var->delta > -10 && var->delta < 10) {
@@ -386,7 +387,7 @@ RParsePlugin r_parse_plugin_arm_pseudo = {
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_PARSE,
 	.data = &r_parse_plugin_arm_pseudo,
 	.version = R2_VERSION

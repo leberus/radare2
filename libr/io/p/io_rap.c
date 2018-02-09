@@ -91,7 +91,6 @@ static int rap__close(RIODesc *fd) {
 	if (RIORAP_IS_VALID (fd)) {
 		if (RIORAP_FD (fd) != NULL) {
 			RIORap *r = fd->data;
-			fd->state = R_IO_DESC_TYPE_CLOSED;
 			ret = r_socket_close (r->fd);
 			ret = r_socket_close (r->client);
 			//ret = r_socket_close (r->client);
@@ -178,6 +177,7 @@ static RIODesc *rap__open(RIO *io, const char *pathname, int rw, int mode) {
 		if (is_ssl) {
 			if (file && *file) {
 				if (!r_socket_listen (rior->fd, port, file)) {
+					r_socket_free (rior->fd);
 					free (rior);
 					return NULL;
 				}
@@ -190,7 +190,7 @@ static RIODesc *rap__open(RIO *io, const char *pathname, int rw, int mode) {
 				return NULL;
 			}
 		}
-		return r_io_desc_new (&r_io_plugin_rap, rior->fd->fd,
+		return r_io_desc_new (io, &r_io_plugin_rap,
 			pathname, rw, mode, rior);
 	}
 	if (!(rap_fd = r_socket_new (is_ssl))) {
@@ -249,7 +249,7 @@ static RIODesc *rap__open(RIO *io, const char *pathname, int rw, int mode) {
 		//return NULL;
 	}
 	//r_socket_free (rap_fd);
-	return r_io_desc_new (&r_io_plugin_rap, rior->fd->fd,
+	return r_io_desc_new (io, &r_io_plugin_rap,
 		pathname, rw, mode, rior);
 }
 
@@ -257,10 +257,10 @@ static int rap__listener(RIODesc *fd) {
 	return (RIORAP_IS_VALID (fd))? RIORAP_IS_LISTEN (fd): 0; // -1 ?
 }
 
-static int rap__system(RIO *io, RIODesc *fd, const char *command) {
+static char *rap__system(RIO *io, RIODesc *fd, const char *command) {
 	int ret, reslen = 0, cmdlen = 0;
 	RSocket *s = RIORAP_FD (fd);
-	unsigned int i, j = 0;
+	unsigned int i;
 	char *ptr, *res, *str;
 	ut8 buf[RMT_MAX];
 
@@ -268,7 +268,7 @@ static int rap__system(RIO *io, RIODesc *fd, const char *command) {
 	i = strlen (command) + 1;
 	if (i > RMT_MAX - 5) {
 		eprintf ("Command too long\n");
-		return -1;
+		return NULL;
 	}
 	r_write_be32 (buf + 1, i);
 	memcpy (buf + 5, command, i);
@@ -279,7 +279,7 @@ static int rap__system(RIO *io, RIODesc *fd, const char *command) {
 	for (;;) {
 		ret = r_socket_read_block (s, buf, 1);
 		if (ret != 1) {
-			return -1;
+			return NULL;
 		}
 		/* system back in the middle */
 		/* TODO: all pkt handlers should check for reverse queries */
@@ -292,8 +292,9 @@ static int rap__system(RIO *io, RIODesc *fd, const char *command) {
 		memset (buf + 1, 0, 4);
 		ret = r_socket_read_block (s, buf + 1, 4);
 		cmdlen = r_read_at_be32 (buf, 1);
-		if (cmdlen + 1 == 0) // check overflow
+		if (cmdlen + 1 == 0) { // check overflow
 			cmdlen = 0;
+		}
 		str = calloc (1, cmdlen + 1);
 		ret = r_socket_read_block (s, (ut8*)str, cmdlen);
 		eprintf ("RUN %d CMD(%s)\n", ret, str);
@@ -315,18 +316,18 @@ static int rap__system(RIO *io, RIODesc *fd, const char *command) {
 	// read
 	ret = r_socket_read_block (s, buf + 1, 4);
 	if (ret != 4) {
-		return -1;
+		return NULL;
 	}
 	if (buf[0] != (RMT_CMD | RMT_REPLY)) {
 		eprintf ("Unexpected rap cmd reply\n");
-		return -1;
+		return NULL;
 	}
 
 	i = r_read_at_be32 (buf, 1);
 	ret = 0;
 	if (i > ST32_MAX) {
 		eprintf ("Invalid length\n");
-		return -1;
+		return NULL;
 	}
 	ptr = (char *)calloc (1, i + 1);
 	if (ptr) {
@@ -340,9 +341,8 @@ static int rap__system(RIO *io, RIODesc *fd, const char *command) {
 		ptr[i] = 0;
 		if (io->cb_printf) {
 			io->cb_printf ("%s", ptr);
-			j = i;
 		} else {
-			j = write (1, ptr, i);
+			(void)write (1, ptr, i);
 		}
 		free (ptr);
 	}
@@ -352,7 +352,7 @@ static int rap__system(RIO *io, RIODesc *fd, const char *command) {
 		ret -= r_socket_read (s, (ut8*)buf, RMT_MAX);
 	}
 #endif
-	return i - j;
+	return NULL;
 }
 
 RIOPlugin r_io_plugin_rap = {

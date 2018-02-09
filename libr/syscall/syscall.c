@@ -1,4 +1,4 @@
-/* radare - Copyright 2008-2016 - LGPL -- pancake */
+/* radare - Copyright 2008-2018 - LGPL -- pancake */
 
 #include <r_types.h>
 #include <r_util.h>
@@ -9,6 +9,7 @@
 
 R_LIB_VERSION (r_syscall);
 
+// TODO: now we use sdb
 extern RSyscallPort sysport_x86[];
 extern RSyscallPort sysport_avr[];
 
@@ -16,29 +17,47 @@ R_API RSyscall* r_syscall_new() {
 	RSyscall *rs = R_NEW0 (RSyscall);
 	if (rs) {
 		rs->sysport = sysport_x86;
-		rs->cb_printf = (PrintfCallback)printf;
 		rs->regs = fastcall_x86_32;
+		rs->srdb = sdb_new0 (); // sysregs database
+		rs->db = sdb_new0 ();
 	}
 	return rs;
 }
 
 R_API void r_syscall_free(RSyscall *s) {
-	sdb_free (s->db);
-	free (s->os);
-	memset (s, 0, sizeof (RSyscall));
-	free (s);
+	if (s) {
+		sdb_free (s->db);
+		free (s->os);
+		free (s);
+	}
 }
 
 /* return fastcall register argument 'idx' for a syscall with 'num' args */
 R_API const char *r_syscall_reg(RSyscall *s, int idx, int num) {
-	if (num < 0 || num >= R_SYSCALL_ARGS || idx<0 || idx>=R_SYSCALL_ARGS) {
+	if (num < 0 || num >= R_SYSCALL_ARGS || idx < 0 || idx >= R_SYSCALL_ARGS) {
 		return NULL;
 	}
 	return s->regs[num].arg[idx];
 }
 
-R_API int r_syscall_setup(RSyscall *s, const char *arch, const char *os, int bits) {
-	const char *file;
+static Sdb *openDatabase(Sdb *db, const char *name) {
+#define SYSCALLPATH "/share/radare2/" R2_VERSION
+	const char *file = sdb_fmt (0, "%s/%s/%s.sdb",
+		r_sys_prefix (NULL), SYSCALLPATH, name);
+	if (!r_file_exists (file)) {
+	//	eprintf ("r_syscall_setup: Cannot find '%s'\n", file);
+		return false;
+	}
+	if (!db) {
+		return sdb_new (0, file, 0);
+	}
+	sdb_reset (db);
+	sdb_open (db, file);
+	return db;
+}
+
+// TODO: should be renamed to r_syscall_use();
+R_API bool r_syscall_setup(RSyscall *s, const char *arch, int bits, const char *cpu, const char *os) {
 	if (!os || !*os) {
 		os = R_SYS_OS;
 	}
@@ -53,8 +72,10 @@ R_API int r_syscall_setup(RSyscall *s, const char *arch, const char *os, int bit
 	}
 	if (!strcmp (arch, "mips")) {
 		s->regs = fastcall_mips;
-	} else if (!strcmp (arch,"avr")) {
+	} else if (!strcmp (arch, "avr")) {
 		s->sysport = sysport_avr;
+	} else if (!strcmp (os, "osx") || !strcmp (os, "macos")) {
+		os = "darwin";
 	} else if (!strcmp (arch,"sh")) {
 		s->regs = fastcall_sh;
 	} else if (!strcmp (arch, "arm")) {
@@ -82,44 +103,18 @@ R_API int r_syscall_setup(RSyscall *s, const char *arch, const char *os, int bit
 		}
 	}
 
-#define SYSCALLPATH R2_PREFIX "/share/radare2/" R2_VERSION "/syscall"
-	file = sdb_fmt (0, "%s/%s-%s-%d.sdb",
-		SYSCALLPATH, os, arch, bits);
-	if (!r_file_exists (file)) {
-		//eprintf ("r_syscall_setup: Cannot find '%s'\n", file);
-		return false;
-	}
+	char *dbName = r_str_newf ("syscall/%s-%s-%d", os, arch, bits);
+	s->db = openDatabase (s->db, dbName);
+	free (dbName);
 
-	//eprintf ("DBG098: syscall->db must be reindexed for k\n");
-#if 0
-	// TODO: use sdb_reset (s->db);
-	/// XXX: memoization doesnt seems to work because RSyscall is recreated instead of configured :(
-	sdb_close (s->db);
-	sdb_reset (s->db);
-	sdb_open (s->db, file);
-#else
-	sdb_close (s->db);
-	sdb_free (s->db);
-	s->db = sdb_new (0, file, 0);
-	// XXX r2 - loads this database 11 times. srsly wtf
-#endif
+	dbName = r_str_newf ("sysregs/%s-%d-%s", arch, bits, cpu ? cpu: arch);
+	s->srdb = openDatabase (s->srdb, dbName);
+	free (dbName);
+
 	if (s->fd) {
 		fclose (s->fd);
 	}
 	s->fd = NULL;
-	return true;
-}
-
-/// XXX wtf is this function for?
-R_API int r_syscall_setup_file(RSyscall *s, const char *path) {
-	if (s->fd) {
-		fclose (s->fd);
-	}
-	s->fd = r_sandbox_fopen (path, "r");
-	if (!s->fd) {
-		return false;
-	}
-	/* TODO: load info from file */
 	return true;
 }
 
@@ -186,7 +181,11 @@ R_API RSyscallItem *r_syscall_get(RSyscall *s, int num, int swi) {
 	}
 	ret = sdb_const_get (s->db, key, 0);
 	if (!ret) {
-		return NULL;
+		key = sdb_fmt (0, "0x%02x.0x%02x", swi, num); // Workaround until Syscall SDB is fixed 
+		ret = sdb_const_get (s->db, key, 0);
+		if (!ret) {
+			return NULL;
+		}	
 	}
 	ret2 = sdb_const_get (s->db, ret, 0);
 	if (!ret2) {
@@ -237,11 +236,15 @@ R_API RList *r_syscall_list(RSyscall *s) {
 	return list;
 }
 
-/* io */
+/* io and sysregs */
 R_API const char *r_syscall_get_io(RSyscall *s, int ioport) {
 	int i;
 	if (!s) {
 		return NULL;
+	}
+	const char *name = r_syscall_sysreg (s, "io", ioport);
+	if (name) {
+		return name;
 	}
 	for (i = 0; s->sysport[i].name; i++) {
 		if (ioport == s->sysport[i].port) {
@@ -251,3 +254,10 @@ R_API const char *r_syscall_get_io(RSyscall *s, int ioport) {
 	return NULL;
 }
 
+R_API const char* r_syscall_sysreg(RSyscall *s, const char *type, ut64 num) {
+	if (!s || !s->db) {
+		return NULL;
+	}
+	const char *key = sdb_fmt (0, "%s,%"PFMT64d, type, num);
+	return sdb_const_get (s->db, key, 0);
+}

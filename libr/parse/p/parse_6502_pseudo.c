@@ -168,14 +168,14 @@ static int parse(RParse *p, const char *data, char *str) {
 	return true;
 }
 
-struct r_parse_plugin_t r_parse_plugin_6502_pseudo = {
+RParsePlugin r_parse_plugin_6502_pseudo = {
 	.name = "6502.pseudo",
 	.desc = "6502 pseudo syntax",
 	.parse = parse,
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {.type = R_LIB_TYPE_PARSE,
+RLibStruct radare_plugin = {.type = R_LIB_TYPE_PARSE,
 	.data = &r_parse_plugin_6502_pseudo,
 	.version = R2_VERSION};
 #endif

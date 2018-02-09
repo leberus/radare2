@@ -46,7 +46,8 @@ binr/rasm2/rasm2.exe
 binr/rax2/rax2
 binr/rax2/rax2.exe
 binr/*/_CodeSignature/*
-build/*
+build
+build_sdb
 config-user.mk
 libr/bin/d/dll/dll
 libr/config.h
@@ -65,6 +66,7 @@ shlr/sdb/src/sdb-version.h
 shlr/sdb/src/sdb_version.h
 shlr/sdb/src/libsdb.so*
 shlr/spp/config.h
+sys/travis/*.txt
 shlr/capstone/
 sys/.mark_python-deps
 sys/.mark_swig
@@ -72,7 +74,7 @@ sys/_work
 radare2-bindings
 radare2-regressions
 radare2-w32-*
-radare2-regressions
+radare2-w64-*
 tags
 **/GPATH
 **/GRTAGS
@@ -85,3 +87,14 @@ tags
 .kdev4/*
 *.kdev4
 radare2-*.zip
+# Ignore meson related files
+./bin
+ninja.exe
+.DS_Store
+infer_out
+infer-out/
+cscope.out
+r2-static/*
+binr/rasign2/rasign2
+binr/rasign2/rasign2.exe
+compile_commands.json

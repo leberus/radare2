@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2017 - pancake, nibble */
+/* radare - LGPL - Copyright 2009-2018 - pancake, nibble */
 
 #include <r_anal.h>
 #include <r_sign.h>
@@ -12,7 +12,7 @@ const char *getRealRef(RCore *core, ut64 off) {
 	RFlagItem *item = NULL;
 	RListIter *iter = NULL;
 
-	RList *list = ht_find (core->flags->ht_off, sdb_fmt (2, "flg.%"PFMT64x, off), NULL);
+	const RList *list = r_flag_get_list (core->flags, off);
 	if (!list) {
 		return NULL;
 	}
@@ -44,16 +44,18 @@ R_API RList *r_sign_fcn_refs(RAnal *a, RAnalFunction *fcn) {
 		return NULL;
 	}
 
-	RList *refs = r_list_newf ((RListFree) free);
-	r_list_foreach (fcn->refs, iter, refi) {
+	RList *ret = r_list_newf ((RListFree) free);
+	RList *refs = r_anal_fcn_get_refs (a, fcn);
+	r_list_foreach (refs, iter, refi) {
 		if (refi->type == R_ANAL_REF_TYPE_CODE || refi->type == R_ANAL_REF_TYPE_CALL) {
 			const char *flag = getRealRef (core, refi->addr);
 			if (flag) {
-				r_list_append (refs, r_str_newf (flag));
+				r_list_append (ret, r_str_newf (flag));
 			}
 		}
 	}
-	return refs;
+	r_list_free (refs);
+	return ret;
 }
 
 static bool deserialize(RAnal *a, RSignItem *it, const char *k, const char *v) {
@@ -285,7 +287,7 @@ static bool addItem(RAnal *a, RSignItem *it) {
 	sdb_set (a->sdb_zigns, key, val, 0);
 
 out:
-	free (curit);
+	r_sign_item_free (curit);
 
 	return retval;
 }
@@ -889,7 +891,7 @@ static int addSearchKwCB(RSignItem *it, void *user) {
 	}
 
 	it2 = r_sign_item_dup (it);
-	r_list_append(ss->items, it2);
+	r_list_append (ss->items, it2);
 
 	// TODO(nibble): change arg data in r_search_keyword_new to void*
 	kw = r_search_keyword_new (bytes->bytes, bytes->size, bytes->mask, bytes->size, (const char *) it2);
@@ -920,7 +922,7 @@ R_API int r_sign_search_update(RAnal *a, RSignSearch *ss, ut64 *at, const ut8 *b
 	if (!a || !ss || !buf || len <= 0) {
 		return 0;
 	}
-	return r_search_update (ss->search, at, buf, len);
+	return r_search_update (ss->search, *at, buf, len);
 }
 
 static bool fcnMetricsCmp(RSignItem *it, RAnalFunction *fcn) {
@@ -1161,7 +1163,7 @@ R_API char *r_sign_path(RAnal *a, const char *file) {
 	}
 
 	if (a->zign_path) {
-		char *path = r_str_newf ("%s%s%s", a->zign_path, R_SYS_DIR, file); 
+		char *path = r_str_newf ("%s%s%s", a->zign_path, R_SYS_DIR, file);
 		abs = r_file_abspath (path);
 		free (path);
 		if (r_file_is_regular (abs)) {
@@ -1178,8 +1180,9 @@ R_API char *r_sign_path(RAnal *a, const char *file) {
 		free (abs);
 	}
 
-	const char *pfx = R2_PREFIX "/share/radare2/" R2_VERSION "/zigns";
-	abs = r_str_newf ("%s%s%s", pfx, R_SYS_DIR, file);
+	/// XXX mixed / and R_SYS_DIR
+	const char *pfx = "/share/radare2/" R2_VERSION "/zigns";
+	abs = r_str_newf ("%s%s%s%s", r_sys_prefix (NULL), pfx, R_SYS_DIR, file);
 	if (r_file_is_regular (abs)) {
 		return abs;
 	}
@@ -1210,10 +1213,66 @@ R_API bool r_sign_load(RAnal *a, const char *file) {
 	return true;
 }
 
+R_API bool r_sign_load_gz(RAnal *a, const char *filename) {
+	ut8 *buf = NULL;
+	int size = 0;
+	char *tmpfile = NULL;
+	bool retval = true;
+
+	char *path = r_sign_path (a, filename);
+	if (!r_file_exists (path)) {
+		eprintf ("error: file %s does not exist\n", filename);
+		retval = false;
+		goto out;
+	}
+
+	if (!(buf = r_file_gzslurp (path, &size, 0))) {
+		eprintf ("error: cannot decompress file\n");
+		retval = false;
+		goto out;
+	}
+
+	if (!(tmpfile = r_file_temp ("r2zign"))) {
+		eprintf ("error: cannot create temp file\n");
+		retval = false;
+		goto out;
+	}
+
+	if (!r_file_dump (tmpfile, buf, size, 0)) {
+		eprintf ("error: cannot dump file\n");
+		retval = false;
+		goto out;
+	}
+
+	if (!r_sign_load (a, tmpfile)) {
+		eprintf ("error: cannot load file\n");
+		retval = false;
+		goto out;
+	}
+
+	if (!r_file_rm (tmpfile)) {
+		eprintf ("error: cannot delete temp file\n");
+		retval = false;
+		goto out;
+	}
+
+out:
+	free (buf);
+	free (tmpfile);
+	free (path);
+
+	return retval;
+}
+
 R_API bool r_sign_save(RAnal *a, const char *file) {
 	bool retval = true;
 
 	if (!a || !file) {
+		return false;
+	}
+	
+	if (sdb_count (a->sdb_zigns) == 0) {
+		eprintf ("WARNING: no zignatures to save\n");
 		return false;
 	}
 

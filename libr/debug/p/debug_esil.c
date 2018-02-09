@@ -48,7 +48,6 @@ static int __esil_init(RDebug *dbg) {
 	dbg->tid = dbg->pid = 1;
 	// aeim
 	// aei
-	eprintf ("TODO: esil-vm not initialized\n");
 	return true;
 }
 
@@ -110,7 +109,7 @@ static char *__esil_reg_profile(RDebug *dbg) {
 	return r_anal_get_reg_profile (dbg->anal);
 }
 
-static int __esil_breakpoint (RBreakpointItem *bp, int set, void *user) {
+static int __esil_breakpoint (RBreakpoint *bp, RBreakpointItem *b, bool set) {
 	//r_io_system (dbg->iob.io, "db");
 	return false;
 }
@@ -149,7 +148,7 @@ RDebugPlugin r_debug_plugin_esil = {
 	.wait = &__esil_wait,
 	.stop = __esil_stop,
 	.kill = __esil_kill,
-	.breakpoint = &__esil_breakpoint,
+	.breakpoint = (RBreakpointCallback)&__esil_breakpoint,
 	.reg_profile = __esil_reg_profile,
 	.reg_read = __reg_read,
 };

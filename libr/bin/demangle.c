@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2011-2016 - pancake */
+/* radare - LGPL - Copyright 2011-2017 - pancake */
 
 #include <r_bin.h>
 #include <cxx/demangle.h>
@@ -11,8 +11,10 @@ R_API void r_bin_demangle_list(RBin *bin) {
 	RBinPlugin *plugin;
 	RListIter *it;
 	int i;
-	if (!bin) return;
-	for (i=0; langs[i]; i++) {
+	if (!bin) {
+		return;
+	}
+	for (i = 0; langs[i]; i++) {
 		eprintf ("%s\n", langs[i]);
 	}
 	r_list_foreach (bin->plugins, it, plugin) {
@@ -25,10 +27,11 @@ R_API void r_bin_demangle_list(RBin *bin) {
 R_API char *r_bin_demangle_plugin(RBin *bin, const char *name, const char *str) {
 	RBinPlugin *plugin;
 	RListIter *it;
-	if (!bin || !name || !str) return NULL;
-	r_list_foreach (bin->plugins, it, plugin) {
-		if (plugin->demangle) {
-			return plugin->demangle (str);
+	if (bin && name && str) {
+		r_list_foreach (bin->plugins, it, plugin) {
+			if (plugin->demangle) {
+				return plugin->demangle (str);
+			}
 		}
 	}
 	return NULL;
@@ -118,7 +121,6 @@ R_API char *r_bin_demangle_msvc(const char *str) {
 }
 
 R_API char *r_bin_demangle_cxx(RBinFile *binfile, const char *str, ut64 vaddr) {
-	char *out;
 	// DMGL_TYPES | DMGL_PARAMS | DMGL_ANSI | DMGL_VERBOSE
 	// | DMGL_RET_POSTFIX | DMGL_TYPES;
 	int i;
@@ -134,34 +136,48 @@ R_API char *r_bin_demangle_cxx(RBinFile *binfile, const char *str, ut64 vaddr) {
 	};
 	if (str[0] == str[1] && *str == '_') {
 		str++;
-	} {
-		for (i = 0; prefixes[i]; i++) {
-			int plen = strlen (prefixes[i]);
-			if (!strncmp (str, prefixes[i], plen)) {
-				str += plen;
-				break;
-			}
+	}
+	for (i = 0; prefixes[i]; i++) {
+		int plen = strlen (prefixes[i]);
+		if (!strncmp (str, prefixes[i], plen)) {
+			str += plen;
+			break;
 		}
 	}
 #if WITH_GPL
-	out = cplus_demangle_v3 (str, flags);
+	char *out = cplus_demangle_v3 (str, flags);
 #else
 	/* TODO: implement a non-gpl alternative to c++v3 demangler */
-	out = NULL;
+	char *out = NULL;
 #endif
 	if (out) {
 		r_str_replace_char (out, ' ', 0);
 	}
 	{
-		/* extract class/method information */
-		char *nerd = (char*)r_str_last (out, "::");
-		if (nerd && *nerd) {
-			*nerd = 0;
-			RBinSymbol *sym = r_bin_class_add_method (binfile, out, nerd + 2, 0);
-			if (sym) {
-				sym->vaddr = vaddr;
+		if (out) {
+			char *sign = (char *)strchr (out, '(');
+			if (sign) {
+				char *str = out;
+				char *ptr = NULL;
+				char *nerd = NULL;
+				do {
+					ptr = strstr (str, "::");
+					if (!ptr || ptr > sign) {
+						break;
+					}
+					nerd = ptr;
+					str = ptr + 1;
+				} while (1);
+
+				if (nerd && *nerd) {
+					*nerd = 0;
+					RBinSymbol *sym = r_bin_class_add_method (binfile, out, nerd + 2, 0);
+					if (sym) {
+						sym->vaddr = vaddr;
+					}
+					*nerd = ':';
+				}
 			}
-			*nerd = ':';
 		}
 	}
 	return out;
@@ -244,13 +260,15 @@ R_API char *r_bin_demangle_objc(RBinFile *binfile, const char *sym) {
 		args = strstr (clas, "__");
 		if (!args) {
 			free (clas);
-			free (name);
+			if (name != clas) {
+				free (name);
+			}
 			return NULL;
 		}
 		*args = 0;
+		free (name);
 		name = strdup (args + 2);
-		if (!name){
-			free (args);
+		if (!name) {
 			free (clas);
 			return NULL;
 		}
@@ -261,8 +279,11 @@ R_API char *r_bin_demangle_objc(RBinFile *binfile, const char *sym) {
 				nargs++;
 			}
 		}
-		if (sym[1] == 'i') type = "public";
-		else if (sym[1] == 'c') type = "static";
+		if (sym[1] == 'i') {
+			type = "public";
+		} else if (sym[1] == 'c') {
+			type = "static";
+		}
 	}
 	if (type) {
 		if (!strcmp (type, "field")) {
@@ -272,16 +293,17 @@ R_API char *r_bin_demangle_objc(RBinFile *binfile, const char *sym) {
 				const char *arg = "int";
 				args = malloc (((strlen (arg) + 4) * nargs) + 1);
 				args[0] = 0;
-				for(i = 0;i < nargs; i++) {
+				for (i = 0;i < nargs; i++) {
 					strcat (args, arg);
-					if (i + 1 < nargs)
+					if (i + 1 < nargs) {
 						strcat (args, ", ");
+					}
 				}
 			} else {
 				args = strdup ("");
 			}
 			if (type && name && *name) {
-				ret = r_str_newf ("%s int  %s::%s(%s)", type, clas, name, args);
+				ret = r_str_newf ("%s int %s::%s(%s)", type, clas, name, args);
 				if (binfile) {
 					r_bin_class_add_method (binfile, clas, name, nargs);
 

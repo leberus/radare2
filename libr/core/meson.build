@@ -38,10 +38,10 @@ files=[
 'core.c',
 'disasm.c',
 'file.c',
+'fortune.c',
 'gdiff.c',
 'graph.c',
 'hack.c',
-'help.c',
 'libs.c',
 #'linux_heap_glibc.c',
 'log.c',
@@ -59,16 +59,20 @@ files=[
 'yank.c'
 ]
 
-r_core = shared_library('r_core', files,
-  include_directories: [platform_inc, include_directories([
-    '../../shlr'
-  ])],
+includes =  ['../../shlr']
+if host_machine.system() != 'windows'
+  includes += ['../../shlr/heap/include']
+endif
+
+r_core = library('r_core', files,
+  include_directories: [platform_inc, include_directories(includes)],
   c_args: ['-DCORELIB=1', '-I' + meson.current_build_dir() + '/../..'],
   link_with: [r_util, r_reg, r_syscall, r_search, r_cons, r_anal, r_socket, r_io, r_fs, r_lang, r_hash, r_flag, r_parse, r_egg, r_debug, r_magic, r_crypto, r_config, r_bin, r_asm, r_bp],
   objects: [
-    libr2sdb.extract_all_objects(),
+	libr2sdb.extract_all_objects(),
 	libr2spp.extract_all_objects(),
-	libr2gdb.extract_all_objects()
+	libr2gdb.extract_all_objects(),
   ],
+  dependencies: [platform_deps],
   install: true
 )

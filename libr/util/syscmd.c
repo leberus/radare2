@@ -136,7 +136,9 @@ R_API char *r_syscmd_ls(const char *input) {
 			path = input;
 		}
 	}
-	if (*path == '~') {
+	if (!path || !*path) {
+		path = ".";
+	} else if (*path == '~') {
 		homepath = r_str_home (path + 2);
 		if (homepath) {
 			path = (const char *)homepath;
@@ -148,9 +150,6 @@ R_API char *r_syscmd_ls(const char *input) {
 				path = (const char *)homepath;
 			}
 		}
-	}
-	if (!path || !*path) {
-		path = ".";
 	}
 	if (!r_file_is_directory (path)) {
 		p = strrchr (path, '/');
@@ -229,7 +228,7 @@ R_API char *r_syscmd_cat(const char *file) {
 	}
 	if (p && *p) {
 		char *filename = strdup (p);
-		filename = r_str_chop (filename);
+		filename = r_str_trim (filename);
 		char *data = r_file_slurp (filename, &sz);
 		if (!data) {
 			eprintf ("No such file or directory\n");
@@ -249,10 +248,10 @@ R_API char *r_syscmd_mkdir(const char *dir) {
 		int ret;
 		char *dirname;
 		if (!strncmp (p + 1, "-p ", 3)) {
-			dirname = r_str_chop (strdup (p + 3));
+			dirname = r_str_trim (strdup (p + 3));
 			ret = r_sys_mkdirp (dirname);
 		} else {
-			dirname = r_str_chop (strdup (p + 1));
+			dirname = r_str_trim (strdup (p + 1));
 			ret = r_sys_mkdir (dirname);
 		}
 		if (!ret) {

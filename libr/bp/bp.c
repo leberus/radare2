@@ -32,6 +32,7 @@ R_API RBreakpoint *r_bp_new() {
 	bp->cb_printf = (PrintfCallback)printf;
 	bp->bps = r_list_newf ((RListFree)r_bp_item_free);
 	bp->plugins = r_list_newf ((RListFree)free);
+	bp->nhwbps = 0;
 	for (i = 0; bp_static_plugins[i]; i++) {
 		static_plugin = R_NEW (RBreakpointPlugin);
 		memcpy (static_plugin, bp_static_plugins[i],
@@ -57,7 +58,7 @@ R_API int r_bp_get_bytes(RBreakpoint *bp, ut8 *buf, int len, int endian, int idx
 	if (bp->cur) {
 		// find matching size breakpoint
 repeat:
-		for (i=0; i< bp->cur->nbps; i++) {
+		for (i = 0; i < bp->cur->nbps; i++) {
 			b = &bp->cur->bps[i];
 			if (bp->cur->bps[i].bits) {
 				if (bp->bits != bp->cur->bps[i].bits) {
@@ -277,7 +278,7 @@ R_API int r_bp_list(RBreakpoint *bp, int rad) {
 			// TODO: add command, tracing, enable, ..
 			if (b->module_name) {
 			    	bp->cb_printf ("dbm %s %"PFMT64d"\n", b->module_name, b->module_delta);
-			} else { 
+			} else {
 				bp->cb_printf ("db 0x%08"PFMT64x"\n", b->addr);
 			}
 			//b->trace? "trace": "break",
@@ -345,4 +346,19 @@ R_API int r_bp_del_index(RBreakpoint *bp, int idx) {
 		return true;
 	}
 	return false;
+}
+
+R_API int r_bp_size(RBreakpoint *bp) {
+	RBreakpointArch *bpa;
+	int i, bpsize = 8;
+	for (i = 0; bp->cur->bps[i].bytes; i++) {
+		bpa = &bp->cur->bps[i];
+		if (bpa->bits && bpa->bits != bp->bits) {
+			continue;
+		}
+		if (bpa->length < bpsize) {
+			bpsize = bpa->length;
+		}
+	}
+	return bpsize;
 }

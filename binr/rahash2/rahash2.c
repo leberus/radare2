@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2016 - pancake */
+/* radare - LGPL - Copyright 2009-2017 - pancake */
 
 #include <stdio.h>
 #include <string.h>
@@ -86,7 +86,7 @@ static void do_hash_hexprint(const ut8 *c, int len, int ule, int rad) {
 	}
 }
 
-static void do_hash_print(RHash *ctx, int hash, int dlen, int rad, int ule) {
+static void do_hash_print(RHash *ctx, ut64 hash, int dlen, int rad, int ule) {
 	char *o;
 	const ut8 *c = ctx->digest;
 	const char *hname = r_hash_name (hash);
@@ -160,7 +160,7 @@ static int do_hash(const char *file, const char *algo, RIO *io, int bsize, int r
 		eprintf ("rahash2: Invalid hashing algorithm specified\n");
 		return 1;
 	}
-	fsize = r_io_size (io);
+	fsize = r_io_desc_size (io->desc);
 	if (fsize < 1) {
 		eprintf ("rahash2: Invalid file size\n");
 		return 1;
@@ -202,7 +202,7 @@ static int do_hash(const char *file, const char *algo, RIO *io, int bsize, int r
 				}
 				for (j = from; j < to; j += bsize) {
 					int len = ((j + bsize) > to)? (to - j): bsize;
-					r_io_pread (io, j, buf, len);
+					r_io_pread_at (io, j, buf, len);
 					do_hash_internal (ctx, hashbit, buf, len, rad, 0, ule);
 				}
 				if (s.buf && !s.prefix) {
@@ -253,7 +253,7 @@ static int do_hash(const char *file, const char *algo, RIO *io, int bsize, int r
 				t = to;
 				for (j = f; j < t; j += bsize) {
 					int nsize = (j + bsize < fsize)? bsize: (fsize - j);
-					r_io_pread (io, j, buf, bsize);
+					r_io_pread_at (io, j, buf, bsize);
 					from = j;
 					to = j + bsize;
 					if (to > fsize) {
@@ -518,7 +518,7 @@ int main(int argc, char **argv) {
 			return 1;
 		} else if (compareBin_len != r_hash_size (algobit))   {
 			eprintf (
-				"rahash2: Given -c hash has %d bytes but the selected algorithm returns %d bytes.\n",
+				"rahash2: Given -c hash has %d byte(s) but the selected algorithm returns %d byte(s).\n",
 				compareBin_len,
 				r_hash_size (algobit));
 			free (compareBin);
@@ -622,6 +622,9 @@ int main(int argc, char **argv) {
 			algobit = r_hash_name_to_bits (algo);
 			if (algobit == 0) {
 				eprintf ("Invalid algorithm. See -E, -D maybe?\n");
+				if (str != hashstr) {
+					free (str);
+				}
 				return 1;
 			}
 			for (i = 1; i < R_HASH_ALL; i <<= 1) {
@@ -636,7 +639,9 @@ int main(int argc, char **argv) {
 				}
 			}
 			if (_s) {
-				free (str);
+				if (str != hashstr) {
+					free (str);
+				}
 				free (s.buf);
 			}
 			return ret;
@@ -674,11 +679,11 @@ int main(int argc, char **argv) {
 				ut8 *buf = (ut8 *) r_stdin_slurp (&sz);
 				char *uri = r_str_newf ("malloc://%d", sz);
 				if (sz > 0) {
-					if (!r_io_open_nomap (io, uri, 0, 0)) {
+					if (!r_io_open_nomap (io, uri, R_IO_READ, 0)) {
 						eprintf ("rahash2: Cannot open malloc://1024\n");
 						return 1;
 					}
-					r_io_pwrite (io, 0, buf, sz);
+					r_io_pwrite_at (io, 0, buf, sz);
 				}
 				free (uri);
 			} else {
@@ -686,7 +691,7 @@ int main(int argc, char **argv) {
 					eprintf ("rahash2: Cannot hash directories\n");
 					return 1;
 				}
-				if (!r_io_open_nomap (io, argv[i], 0, 0)) {
+				if (!r_io_open_nomap (io, argv[i], R_IO_READ, 0)) {
 					eprintf ("rahash2: Cannot open '%s'\n", argv[i]);
 					return 1;
 				}

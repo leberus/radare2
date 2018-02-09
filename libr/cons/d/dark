@@ -1,6 +1,7 @@
 ec b0x00 rgb:444
 ec help rgb:366
 ec comment rgb:99a
+ec usrcmt rgb:368
 ec input rgb:bbb
 ec b0x7f rgb:555
 ec b0xff rgb:666
@@ -12,6 +13,7 @@ ec cmp rgb:666
 ec fline rgb:366
 ec flag rgb:99a
 ec flow rgb:bbb
+ec flow2 rgb:99a
 ec jmp rgb:368
 ec fname rgb:99a
 ec label rgb:99a

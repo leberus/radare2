@@ -23,22 +23,23 @@ CS_PATCHES=0
 else
 CS_TAR=
 CS_URL=$(GIT_PREFIX)github.com/aquynh/capstone.git
-CS_UPD=20170529
+CS_UPD=20180106
 CS_BRA=next
-CS_TIP=7982670984222e2d3bb8117da6225e06d119f56f
+CS_TIP=bdbc57de63725a98732ddc34b48de96f8ada66f2
 # REVERT THIS COMMIT BECAUSE ITS WRONG
 CS_REV=
 CS_PATCHES=1
 endif
 
-.PHONY: capstone-sync capstone-build all clean mrproper libgdbr libwind bochs
+.PHONY: capstone-sync capstone-build all clean mrproper libgdbr libwindbg bochs
 
 HOST_CC?=gcc
 SHLR?=$(shell pwd)
 AR?=ar
 RANLIB?=ranlib
 MODS=sdb zip udis86 java tcc
-MODS+=gdb qnx
+MODS+=gdb qnx ar
+# lz4
 ifneq ($(CC),cccl)
 ifeq (1,$(WITH_GPL))
 MODS+=grub
@@ -58,14 +59,14 @@ all:
 	exit 1
 endif
 
-preall: targets libwind capstone-build bochs
+preall: targets libwindbg capstone-build bochs
 	@for MOD in ${MODS} ; do \
 		echo $(MAKE) -C $$MOD ; \
 		$(MAKE) -C $$MOD HAVE_VALA= ROOT="${PWD}/../" CC="${CC}" ; \
 	done
 
 SDBFILES=sdb/src/.sdb${EXT_EXE} sdb/sdb${EXT_EXE} sdb/src/.sdb sdb/sdb
-PREMODS=capstone gdb wind sdb bochs
+PREMODS=capstone gdb windbg sdb bochs ar
 
 clean mrproper:
 	rm -f ${SDBFILES}
@@ -132,15 +133,15 @@ endif
 	cp -f sdb/src/.sdb${BUILD_EXT_EXE} $@
 
 .PHONY: sdb-sync sync-sdb sdbclean
-F=README.md config.mk src Makefile Jamroot
+F=README.md config.mk src Makefile Jamroot meson.build msvc
 SYNCFILES=$(addprefix sdb.vc/,${F})
 I=../libr/include
 
 libgdbr:
 	$(MAKE) -C gdb all
 
-libwind:
-	$(MAKE) -C wind all
+libwindbg:
+	$(MAKE) -C windbg all
 
 bochs:
 	$(MAKE) -C bochs all
@@ -242,11 +243,15 @@ else
 capstone: capstone-sync
 
 capstone-sync:
+ifeq ($(WITHOUT_PULL),1)
+	@echo "Nothing to sync because of --without-pull"
+else
 	"$(SHELL)" capstone.sh "${CS_URL}" "${CS_BRA}" "${CS_TIP}" "${CS_REV}"
 ifeq ($(CS_PATCHES),1)
 	-cd capstone ; $(GIT) reset --hard
 	#cd capstone ; for PATCH in ../capstone-patches/* ; do patch -tp1 < $$PATCH ; done
 	cd capstone ; for PATCH in ../capstone-patches/* ; do patch -p1 < $$PATCH ; done
+endif
 endif
 
 .PHONY: capstone
@@ -270,7 +275,11 @@ endif
 	cd ../.. ; git clone --depth 1 https://github.com/radare/radare2-webui
 
 ../../radare2-webui/dist/m: ../../radare2-webui
-	cd ../../radare2-webui/www/m ; git pull ; npm install ; $(MAKE) release
+ifeq ($(WITHOUT_PULL),1)
+	cd ../../radare2-webui/www/m && npm i ; $(MAKE) release
+else
+	cd ../../radare2-webui/www/m && git pull ; npm i ; $(MAKE) release
+endif
 
 www-sync-m sync-www-m: ../../radare2-webui/dist/m
 	cp -rf ../../radare2-webui/dist/m www/m.tmp
@@ -302,6 +311,6 @@ spp-sync sync-spp:
 	git add spp
 
 spp: spp-sync
-	CFLAGS=-fPIC $(MAKE) -C spp
+	CFLAGS="-DHAVE_FORK=${HAVE_FORK} -fPIC" $(MAKE) -C spp
 
 .PHONY: spp

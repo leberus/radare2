@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2015-2016 - pancake */
+/* radare - LGPL - Copyright 2015-2017 - pancake */
 
 #include <r_core.h>
 #define TYPE_NONE 0
@@ -173,7 +173,8 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 	r_config_save_num (hc, "asm.pseudo", "asm.decode", "asm.lines", "asm.bytes", NULL);
 	r_config_save_num (hc, "asm.offset", "asm.flags", "asm.fcnlines", "asm.comments", NULL);
 	r_config_save_num (hc, "asm.functions", "asm.section", "asm.cmtcol", "asm.filter", NULL);
-	r_config_save_num (hc, "scr.color", "asm.emustr", "asm.emu", "asm.emuwrite", NULL);
+	r_config_save_num (hc, "scr.color", "asm.emu.str", "asm.emu", "asm.emu.write", NULL);
+	r_config_save_num (hc, "io.cache", NULL);
 	if (!fcn) {
 		eprintf ("Cannot find function in 0x%08"PFMT64x"\n", core->offset);
 		r_config_hold_free (hc);
@@ -188,56 +189,65 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 	r_config_set_i (core->config, "asm.offset", 0);
 	r_config_set_i (core->config, "asm.flags", 0);
 	r_config_set_i (core->config, "asm.emu", 1);
-	r_config_set_i (core->config, "asm.emustr", 1);
-	r_config_set_i (core->config, "asm.emuwrite", 1);
+	r_config_set_i (core->config, "asm.emu.str", 1);
+	r_config_set_i (core->config, "asm.emu.write", 1);
 	r_config_set_i (core->config, "asm.fcnlines", 0);
 	r_config_set_i (core->config, "asm.comments", 1);
 	r_config_set_i (core->config, "asm.functions", 0);
 	r_config_set_i (core->config, "asm.tabs", 0);
 	r_config_set_i (core->config, "asm.section", 0);
 	r_config_set_i (core->config, "asm.cmtcol", 30);
+	r_config_set_i (core->config, "io.cache", 1);
 	r_core_cmd0 (core, "aeim");
 
 	db = sdb_new0 ();
-
-	/* */
 	// walk all basic blocks
 	// define depth level for each block
 	// use it for indentation
 	// asm.pseudo=true
 	// asm.decode=true
 	RAnalBlock *bb = r_list_first (fcn->bbs);
-	char indentstr[1024];
+	char indentstr[1024] = {0};
 	int n_bb = r_list_length (fcn->bbs);
 	r_cons_printf ("function %s () {", fcn->name);
 	int indent = 1;
 	int nindent = 1;
-
+	RList *visited = r_list_newf (NULL);
+	r_cons_printf ("\n    //  %d basic blocks\n", n_bb);
 	do {
 #define I_TAB 4
 #define K_MARK(x) sdb_fmt(0,"mark.%"PFMT64x,x)
 #define K_ELSE(x) sdb_fmt(0,"else.%"PFMT64x,x)
 #define K_INDENT(x) sdb_fmt(0,"loc.%"PFMT64x,x)
-#define SET_INDENT(x) { memset (indentstr, ' ', x*I_TAB); indentstr [(x*I_TAB)-2] = 0; }
-		if (!bb) break;
+#define SET_INDENT(x) { x = x>0?x:1; memset (indentstr, ' ', x*I_TAB); indentstr [(x*I_TAB)-2] = 0; }
+		if (!bb) {
+			break;
+		}
+		r_list_append (visited, bb);
 		r_cons_push ();
+		bool html = r_config_get_i (core->config, "scr.html");
+		r_config_set_i (core->config, "scr.html", 0);
 		char *code = r_core_cmd_str (core, sdb_fmt (0, "pD %d @ 0x%08"PFMT64x"\n", bb->size, bb->addr));
 		r_cons_pop ();
-		memset (indentstr, ' ', indent * I_TAB);
-		indentstr [(indent * I_TAB) - 2] = 0;
+		r_config_set_i (core->config, "scr.html", html);
+		if (indent * I_TAB + 2 >= sizeof (indentstr)) {
+			indent = (sizeof (indentstr) / I_TAB) - 4;
+		}
+		SET_INDENT (indent);
 		code = r_str_prefix_all (code, indentstr);
+		if (!code) {
+			eprintf ("No code here\n");
+			break;
+		}
 		int len = strlen (code);
 		code[len - 1] = 0; // chop last newline
-		//r_cons_printf ("\n%s  loc_0x%llx:\n", indentstr, bb->addr);
-		//if (nindent != indent) {
-		//	r_cons_printf ("\n%s  loc_0x%llx:\n", indentstr, bb->addr);
-		//}
 		find_and_change (code, len);
 		if (!sdb_const_get (db, K_MARK (bb->addr), 0)) {
 			bool mustprint = !queuegoto || queuegoto != bb->addr;
 			if (mustprint) {
 				if (queuegoto) {
-					r_cons_printf ("\n%s  goto loc_0x%llx", indentstr, queuegoto);
+					r_cons_printf ("\n%s  goto loc_0x%llx",
+						indentstr, queuegoto);
 					queuegoto = 0LL;
 				}
 				r_cons_printf ("\n%s  loc_0x%llx:\n", indentstr, bb->addr);
@@ -260,7 +270,19 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 					r_cons_printf ("\n%s}", indentstr);
 				}
 				r_cons_printf ("\n%sreturn;\n", indentstr);
-				break;
+				RAnalBlock *nbb = r_anal_bb_from_offset (core->anal, bb->fail);
+				if (r_list_contains (visited, nbb)) {
+					nbb = r_anal_bb_from_offset (core->anal, bb->jump);
+					if (r_list_contains (visited, nbb)) {
+						nbb = NULL;
+					}
+				}
+				if (!nbb) {
+					break;
+				}
+				bb = nbb;
+				indent--;
+				continue;
 			}
 			if (sdb_num_get (db, K_ELSE (bb->addr), 0)) {
 				if (!strcmp (blocktype, "else")) {
@@ -273,7 +295,7 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 			}
 			if (addr != bb->addr) {
 				queuegoto = addr;
-				//r_cons_printf ("\n%s  goto loc_0x%llx", indentstr, addr);
+				// r_cons_printf ("\n%s  goto loc_0x%llx", indentstr, addr);
 			}
 			bb = r_anal_bb_from_offset (core->anal, addr);
 			if (!bb) {
@@ -302,7 +324,7 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 				if (curfcn != fcn) {
 					// chop that branch
 					r_cons_printf ("\n  // chop\n");
-					break;
+				//	break;
 				}
 				if (sdb_get (db, K_INDENT (jump), 0)) {
 					// already tracekd
@@ -346,7 +368,7 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 			} else {
 				ut64 addr = sdb_array_pop_num (db, "indent", NULL);
 				if (addr == UT64_MAX) {
-					//r_cons_printf ("\nbreak\n");
+					r_cons_printf ("\n(break)\n");
 					break;
 				}
 				bb = r_anal_bb_from_offset (core->anal, addr);
@@ -366,6 +388,7 @@ R_API int r_core_pseudo_code(RCore *core, const char *input) {
 		}
 		//n_bb --;
 	} while (n_bb > 0);
+	r_list_free (visited);
 	r_cons_printf ("\n}\n");
 	r_config_restore (hc);
 	r_config_hold_free (hc);

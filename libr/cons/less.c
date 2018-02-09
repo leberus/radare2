@@ -27,7 +27,7 @@ static void color_line(const char *line, RStrpool *p, RList *ml){
 		m_addr = r_str_ndup (line + m->rm_so, m_len);
 		if (m_addr) {
 			/* in case there's a CSI in the middle of this match*/
-			m_len = r_str_ansi_filter(m_addr, NULL, NULL, m_len);
+			m_len = r_str_ansi_filter (m_addr, NULL, NULL, m_len);
 			if (m_len<0) m_len = 0;
 			r_strpool_memcat (p, m_addr, m_len);
 			r_strpool_memcat (p, inv[1], linv[1]);
@@ -42,14 +42,16 @@ static void color_line(const char *line, RStrpool *p, RList *ml){
 
 static void printpage (const char *line, int *index, RList **mla, int from, int to, int w) {
 	int i;
-	RStrpool *p;
 
 	r_cons_clear00 ();
 	if (from < 0 || to < 0) {
 		return;
 	}
-	p = r_strpool_new (0);
-	if (!p) return;
+
+	RStrpool *p = r_strpool_new (0);
+	if (!p) {
+		return;
+	}
 	for (i = from; i < to; i++) {
 		color_line (line + index[i], p, mla[i]);
 		r_strpool_ansi_chop (p, w);
@@ -123,12 +125,15 @@ static int all_matches(const char *s, RRegex *rx, RList **mla, int *lines, int l
 		const char *loff = s + lines[l]; /* current line offset */
 		char *clean = strdup (loff);
 		if (!clean) return 0;
-		int *cpos;
-		r_str_ansi_filter (clean, NULL, &cpos, 0);
+		int *cpos = NULL;
+		int ncpos = r_str_ansi_filter (clean, NULL, &cpos, 0);
 		m.rm_eo = slen = strlen (clean);
 		r_list_purge (mla[l]);
-		while (!r_regex_exec (rx, clean, 1, &m, R_REGEX_STARTEND)){
+		while (!r_regex_exec (rx, clean, 1, &m, R_REGEX_STARTEND)) {
 			RRegexMatch *ms = R_NEW0 (RRegexMatch);
+			if (!cpos || m.rm_so >= ncpos) {
+				break;
+			}
 			ms->rm_so = cpos[m.rm_so];
 			ms->rm_eo = cpos[m.rm_eo];
 			r_list_append (mla[l], ms);
@@ -149,6 +154,7 @@ R_API int r_cons_less_str(const char *str, const char *exitkeys) {
 		" jk       - line down/up\n"
 		" gG       - begin/end buffer\n"
 		" /        - search in buffer\n"
+		" _        - enter the hud mode\n"
 		" n/p      - next/prev search result\n"
 		" q        - quit\n"
 		" ?        - show this help\n"
@@ -162,8 +168,14 @@ R_API int r_cons_less_str(const char *str, const char *exitkeys) {
 	if (!str || !*str) {
 		return 0;
 	}
+	// rcons kills str after flushing the buffer, so we must keep a copy
+	char *ostr = strdup (str);
+	if (!ostr) {
+		return 0;
+	}
 	char *p = strdup (str);
 	if (!p) {
+		free (ostr);
 		return 0;
 	}
 	int *lines = splitlines (p, &lines_count);
@@ -173,6 +185,7 @@ R_API int r_cons_less_str(const char *str, const char *exitkeys) {
 		mla = calloc (lines_count, sizeof (RList *));
 		if (!mla) {
 			free (p);
+			free (ostr);
 			free (lines);
 			return 0;
 		}
@@ -199,13 +212,17 @@ R_API int r_cons_less_str(const char *str, const char *exitkeys) {
 			for (i = 0; i < lines_count; i++) {
 				r_list_free (mla[i]);
 			}
-			free (mla);
 			free (p);
+			free (mla);
+			free (ostr);
 			free (lines);
 			return ch;
 		}
 		ch = r_cons_arrow_to_hjkl (ch);
 		switch (ch) {
+		case '_':
+			r_cons_hud_string (ostr);
+			break;
 		case '?':
 			if (!in_help) {
 				in_help = true;
@@ -272,6 +289,7 @@ R_API int r_cons_less_str(const char *str, const char *exitkeys) {
 	r_cons_reset_colors ();
 	r_cons_set_raw (false);
 	r_cons_show_cursor (true);
+	free (ostr);
 	return 0;
 }
 

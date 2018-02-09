@@ -22,6 +22,17 @@ R_API int r_core_patch_line (RCore *core, char *str) {
 		  r_core_cmdf (core, "s %s", str);
 		  r_core_cmdf (core, "wa %s", p);
 		  break;
+	case 'v':
+		q = strchr (p + 1,' ');
+		if (q) {
+			*q = 0;
+			for (++q; *q == ' '; q++); // XXX: skipsspaces here
+		} else {
+			return 0;
+		}
+		r_core_cmdf (core, "s %s", str);
+		r_core_cmdf (core, "wv%s %s", p + 1, q);
+		break;
 	default:
 		  r_core_cmdf (core, "s %s", str);
 		  r_core_cmdf (core, "wx %s", p);
@@ -71,8 +82,8 @@ static int __core_patch_bracket(RCore *core, const char *str, ut64 *noff) {
 	r_egg_load (core->egg, s, 0);
 	free (s);
 
-	r_egg_compile (core->egg);
-	r_egg_assemble (core->egg);
+	(void)r_egg_compile (core->egg);
+	(void)r_egg_assemble (core->egg);
 
 	r_buf_free (b);
 	b = r_egg_get_bin (core->egg);

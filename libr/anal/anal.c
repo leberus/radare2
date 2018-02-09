@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2017 - pancake, nibble */
+/* radare - LGPL - Copyright 2009-2018 - pancake, nibble */
 
 #include <r_anal.h>
 #include <r_util.h>
@@ -70,6 +70,7 @@ R_API RAnal *r_anal_new() {
 	anal->decode = true; // slow slow if not used
 	anal->gp = 0LL;
 	anal->sdb = sdb_new0 ();
+	anal->opt.depth = 32;
 	anal->opt.noncode = false; // do not analyze data by default
 	r_space_new (&anal->meta_spaces, "CS", meta_unset_for, meta_count_for, NULL, anal);
 	r_space_new (&anal->zign_spaces, "zs", zign_unset_for, zign_count_for, zign_rename_for, anal);
@@ -80,6 +81,11 @@ R_API RAnal *r_anal_new() {
 	anal->sdb_types = sdb_ns (anal->sdb, "types", 1);
 	anal->sdb_cc = sdb_ns (anal->sdb, "cc", 1);
 	anal->sdb_zigns = sdb_ns (anal->sdb, "zigns", 1);
+#if USE_DICT
+	anal->dict_refs = dict_new (100, dict_free);
+	anal->dict_xrefs = dict_new (100, dict_free);
+#endif
+	anal->zign_path = strdup ("");
 	anal->cb_printf = (PrintfCallback) printf;
 	(void)r_anal_pin_init (anal);
 	(void)r_anal_xrefs_init (anal);
@@ -95,6 +101,7 @@ R_API RAnal *r_anal_new() {
 	anal->bits_ranges = r_list_newf (free);
 	anal->lineswidth = 0;
 	anal->fcns = r_anal_fcn_list_new ();
+	anal->fcn_tree = NULL;
 #if USE_NEW_FCN_STORE
 	anal->fcnstore = r_listrange_new ();
 #endif
@@ -136,7 +143,6 @@ R_API RAnal *r_anal_free(RAnal *a) {
 	r_anal_op_free (a->queued);
 	r_list_free (a->bits_ranges);
 	a->sdb = NULL;
-	r_syscall_free (a->syscall);
 	sdb_ns_free (a->sdb);
 	if (a->esil) {
 		r_anal_esil_free (a->esil);
@@ -173,28 +179,30 @@ R_API bool r_anal_use(RAnal *anal, const char *name) {
 	RListIter *it;
 	RAnalPlugin *h;
 
-	bool change = anal && anal->cur && strcmp (anal->cur->name, name);
-	r_list_foreach (anal->plugins, it, h) {
-		if (!strcmp (h->name, name)) {
-#if 0
-			// regression happening here for asm.emu
-			if (anal->cur && anal->cur == h) {
+	if (anal) {
+		bool change = anal->cur && strcmp (anal->cur->name, name);
+		r_list_foreach (anal->plugins, it, h) {
+			if (!strcmp (h->name, name)) {
+	#if 0
+				// regression happening here for asm.emu
+				if (anal->cur && anal->cur == h) {
+					return true;
+				}
+	#endif
+				anal->cur = h;
+				r_anal_set_reg_profile (anal);
+				if (change) {
+					r_anal_set_fcnsign (anal, NULL);
+				}
+	#if 1
+				/* invalidate esil state? really ? */
+				if (anal->esil) {
+					r_anal_esil_free (anal->esil);
+					anal->esil = NULL;
+				}
+	#endif
 				return true;
 			}
-#endif
-			anal->cur = h;
-			r_anal_set_reg_profile (anal);
-			if (change) {
-				r_anal_set_fcnsign (anal, NULL);
-			}
-#if 1
-			/* invalidate esil state? really ? */
-			if (anal->esil) {
-				r_anal_esil_free (anal->esil);
-				anal->esil = NULL;
-			}
-#endif
-			return true;
 		}
 	}
 	return false;
@@ -222,13 +230,14 @@ R_API bool r_anal_set_reg_profile(RAnal *anal) {
 }
 
 R_API bool r_anal_set_fcnsign(RAnal *anal, const char *name) {
-#define FCNSIGNPATH R2_PREFIX "/share/radare2/" R2_VERSION "/fcnsign"
+#define FCNSIGNPATH "share/radare2/" R2_VERSION "/fcnsign"
+	const char *dirPrefix = r_sys_prefix (NULL);
 	char *file = NULL;
 	const char *arch = (anal->cur && anal->cur->arch) ? anal->cur->arch : R_SYS_ARCH;
 	if (name && *name) {
-		file = sdb_fmt (0, "%s/%s.sdb", FCNSIGNPATH, name);
+		file = sdb_fmt (0, "%s/%s/%s.sdb", dirPrefix, FCNSIGNPATH, name);
 	} else {
-		file = sdb_fmt (0, "%s/%s-%s-%d.sdb", FCNSIGNPATH,
+		file = sdb_fmt (0, "%s/%s/%s-%s-%d.sdb", dirPrefix, FCNSIGNPATH,
 			anal->os, arch, anal->bits);
 	}
 	if (r_file_exists (file)) {
@@ -269,6 +278,7 @@ R_API bool r_anal_set_bits(RAnal *anal, int bits) {
 	switch (bits) {
 	case 8:
 	case 16:
+	case 27:
 	case 32:
 	case 64:
 		if (anal->bits != bits) {
@@ -305,8 +315,15 @@ R_API ut8 *r_anal_mask(RAnal *anal, int size, const ut8 *data, ut64 at) {
 		return anal->cur->anal_mask (anal, size, data, at);
 	}
 
-	op = r_anal_op_new ();
-	ret = malloc (size);
+	if (!(op = r_anal_op_new ())) {
+		return NULL;
+	}
+
+	if (!(ret = malloc (size))) {
+		r_anal_op_free (op);
+		return NULL;
+	}
+
 	memset (ret, 0xff, size);
 
 	while (idx < size) {
@@ -398,6 +415,7 @@ R_API int r_anal_purge (RAnal *anal) {
 	sdb_reset (anal->sdb_zigns);
 	r_list_free (anal->fcns);
 	anal->fcns = r_anal_fcn_list_new ();
+	anal->fcn_tree = NULL;
 #if USE_NEW_FCN_STORE
 	r_listrange_free (anal->fcnstore);
 	anal->fcnstore = r_listrange_new ();
@@ -445,7 +463,10 @@ static int nonreturn_print(void *p, const char *k, const char *v) {
 		}
 	}
 	if (!strncmp (k, "addr.", 5)) {
-		char *off = strdup (k + 5);
+		char *off;
+		if (!(off = strdup (k + 5))) {
+			return 1;
+		}
 		char *ptr = strstr (off, ".noret");
 		if (ptr) {
 			*ptr = 0;
@@ -539,13 +560,14 @@ R_API int r_anal_noreturn_drop(RAnal *anal, const char *expr) {
 		}
 	}
 }
+
 static bool r_anal_noreturn_at_name(RAnal *anal, const char *name) {
 	if (sdb_bool_get (anal->sdb_types, K_NORET_FUNC(name), NULL)) {
 		return true;
 	}
 	char *tmp = r_anal_type_func_guess (anal, (char *)name);
 	if (tmp) {
-		if (sdb_bool_get (anal->sdb_types, K_NORET_FUNC(tmp), NULL)) {
+		if (sdb_bool_get (anal->sdb_types, K_NORET_FUNC (tmp), NULL)) {
 			free (tmp);
 			return true;
 		}
@@ -555,10 +577,42 @@ static bool r_anal_noreturn_at_name(RAnal *anal, const char *name) {
 }
 
 R_API bool r_anal_noreturn_at_addr(RAnal *anal, ut64 addr) {
-	if (sdb_bool_get (anal->sdb_types, K_NORET_ADDR(addr), NULL)) {
-		return true;
+	return sdb_bool_get (anal->sdb_types, K_NORET_ADDR (addr), NULL);
+}
+
+bool noreturn_recurse(RAnal *anal, ut64 addr) {
+	RAnalOp op = {0};
+	ut8 bbuf[0x10] = {0};
+	ut64 recurse_addr = UT64_MAX;
+	if (!anal->iob.read_at (anal->iob.io, addr, bbuf, sizeof (bbuf))) {
+		eprintf ("Couldn't read buffer\n");
+		return false;
 	}
-	return false;
+	// TODO: check return value
+	(void)r_anal_op (anal, &op, addr, bbuf, sizeof (bbuf));
+	switch (op.type & R_ANAL_OP_TYPE_MASK) {
+	case R_ANAL_OP_TYPE_JMP:
+		if (op.jump == UT64_MAX) {
+			recurse_addr = op.ptr;
+		} else {
+			recurse_addr = op.jump;
+		}
+		break;
+	case R_ANAL_OP_TYPE_UCALL:
+	case R_ANAL_OP_TYPE_RCALL:
+	case R_ANAL_OP_TYPE_ICALL:
+	case R_ANAL_OP_TYPE_IRCALL:
+		recurse_addr = op.ptr;
+		break;
+	case R_ANAL_OP_TYPE_CCALL:
+	case R_ANAL_OP_TYPE_CALL:
+		recurse_addr = op.jump;
+		break;
+	}
+	if (recurse_addr == UT64_MAX || recurse_addr == addr) {
+		return false;
+	}
+	return r_anal_noreturn_at (anal, recurse_addr);
 }
 
 R_API bool r_anal_noreturn_at(RAnal *anal, ut64 addr) {
@@ -587,6 +641,9 @@ R_API bool r_anal_noreturn_at(RAnal *anal, ut64 addr) {
 		if (r_anal_noreturn_at_name (anal, fi->name)) {
 			return true;
 		}
+	}
+	if (anal->recursive_noreturn) {
+		return noreturn_recurse (anal, addr);
 	}
 	return false;
 }

@@ -186,8 +186,8 @@ static RList *r_bin_wasm_get_sections_by_id (RList *sections, ut8 id) {
 	return ret;
 }
 
-#if 0
-static const char *r_bin_wasm_valuetype_to_string (r_bin_wasm_value_type_t type) {
+# if 0
+const char *r_bin_wasm_valuetype_to_string (r_bin_wasm_value_type_t type) {
 	switch (type) {
 	case R_BIN_WASM_VALUETYPE_i32:
 		return r_str_const ("i32");
@@ -197,8 +197,12 @@ static const char *r_bin_wasm_valuetype_to_string (r_bin_wasm_value_type_t type)
 		return r_str_const ("f32");
 	case R_BIN_WASM_VALUETYPE_f64:
 		return r_str_const ("f64");
+	case R_BIN_WASM_VALUETYPE_ANYFUNC:
+		return r_str_const ("ANYFUNC");
+	case R_BIN_WASM_VALUETYPE_FUNC:
+		return r_str_const ("FUNC");
 	default:
-		return r_str_const ("?");
+		return r_str_const ("<?>");
 	}
 }
 
@@ -297,16 +301,17 @@ static RList *r_bin_wasm_get_type_entries (RBinWasmObj *bin, RBinWasmSection *se
 			}
 		}
 		// r_bin_wasm_type_entry_to_string (ptr);
-		r_list_append (ret, ptr);
+		if (!r_list_append (ret, ptr)) {
+			r_bin_wasm_free_types (ptr);
+			// should this jump to beach?
+		}
+		ptr = NULL;
 		r++;
 	}
 	return ret;
 beach:
 	eprintf ("err: beach type entries\n");
-	if (ptr) {
-		free (ptr->param_types);
-		free (ptr);
-	}
+	r_bin_wasm_free_types (ptr);
 	return ret;
 }
 
@@ -323,7 +328,7 @@ static RList *r_bin_wasm_get_import_entries (RBinWasmObj *bin, RBinWasmSection *
 	}
 	RBuffer *b = bin->buf;
 	r_buf_seek (b, sec->payload_data, R_IO_SEEK_SET);
-	ut64 max = b->cur + sec->payload_len - 1; 
+	ut64 max = b->cur + sec->payload_len - 1;
 	if (!(max < b->length)) {
 		goto beach;
 	}
@@ -343,7 +348,7 @@ static RList *r_bin_wasm_get_import_entries (RBinWasmObj *bin, RBinWasmSection *
 		}
 		if (consume_str_r (b, max, ptr->field_len, ptr->field_str) < ptr->field_len) {
 			goto beach;
-		} 
+		}
 		if (!(consume_u7_r (b, max, &ptr->kind))) {
 			goto beach;
 		}
@@ -475,13 +480,17 @@ static RList *r_bin_wasm_get_code_entries (RBinWasmObj *bin, RBinWasmSection *se
 		}
 		// search 'r' in function_space, if present get signature from types
 		// if export get name
-		r_list_append (ret, ptr);
+		if (!r_list_append (ret, ptr)) {
+			r_bin_wasm_free_codes (ptr);
+			// should it jump to beach?
+		}
+		ptr = NULL;
 		r++;
 	}
 	return ret;
 beach:
 	eprintf("err: beach code entries\n");
-	free (ptr);
+	r_bin_wasm_free_codes (ptr);
 	return ret;
 }
 
@@ -513,12 +522,16 @@ static RList *r_bin_wasm_get_data_entries (RBinWasmObj *bin, RBinWasmSection *se
 		if (!(ptr->offset.len = consume_init_expr_r (b, max, R_BIN_WASM_END_OF_CODE, NULL))) {
 			goto beach;
 		}
-		if (!(consume_u32_r (b, max, &ptr->size))) {	
+		if (!(consume_u32_r (b, max, &ptr->size))) {
 			goto beach;
 		}
 		ptr->data = b->cur;
 		r_buf_seek (b, ptr->size, R_IO_SEEK_CUR);
-		r_list_append (ret, ptr);
+		if (!r_list_append (ret, ptr)) {
+			free (ptr);
+			// should it jump to beach?
+		}
+		ptr = NULL;
 		r++;
 	}
 	return ret;
@@ -529,7 +542,7 @@ beach:
 }
 
 static RBinWasmStartEntry *r_bin_wasm_get_start (RBinWasmObj *bin, RBinWasmSection *sec) {
-	RBinWasmStartEntry *ptr;	
+	RBinWasmStartEntry *ptr;
 
 	if (!(ptr = R_NEW0 (RBinWasmStartEntry))) {
 		return NULL;
@@ -576,7 +589,11 @@ static RList *r_bin_wasm_get_memory_entries (RBinWasmObj *bin, RBinWasmSection *
 		if (!(consume_limits_r (b, max, &ptr->limits))) {
 			goto beach;
 		}
-		r_list_append (ret, ptr);
+		if (!r_list_append (ret, ptr)) {
+			free (ptr);
+			// should it jump to beach?
+		}
+		ptr = NULL;
 		r++;
 	}
 	return ret;
@@ -614,7 +631,11 @@ static RList *r_bin_wasm_get_table_entries (RBinWasmObj *bin, RBinWasmSection *s
 		if (!(consume_limits_r (b, max, &ptr->limits))) {
 			goto beach;
 		}
-		r_list_append (ret, ptr);
+		if (!r_list_append (ret, ptr)) {
+			free (ptr);
+			// should it jump to beach?
+		}
+		ptr = NULL;
 		r++;
 	}
 	return ret;
@@ -655,7 +676,11 @@ static RList *r_bin_wasm_get_global_entries (RBinWasmObj *bin, RBinWasmSection *
 		if (!(consume_init_expr_r (b, max, R_BIN_WASM_END_OF_CODE, NULL))) {
 			goto beach;
 		}
-		r_list_append (ret, ptr);
+		if (!r_list_append (ret, ptr)) {
+			free (ptr);
+			// should it jump to beach?
+		}
+		ptr = NULL;
 		r++;
 	}
 	return ret;
@@ -703,7 +728,11 @@ static RList *r_bin_wasm_get_element_entries (RBinWasmObj *bin, RBinWasmSection 
 				goto beach;
 			}
 		}
-		r_list_append (ret, ptr);
+		if (!r_list_append (ret, ptr)) {
+			free (ptr);
+			// should it jump to beach?
+		}
+		ptr = NULL;
 		r++;
 	}
 	return ret;
@@ -714,7 +743,7 @@ beach:
 }
 
 // Public functions
-RBinWasmObj *r_bin_wasm_init (RBinFile *arch) {
+RBinWasmObj *r_bin_wasm_init (RBinFile *bf) {
 	RBinWasmObj *bin = R_NEW0 (RBinWasmObj);
 	if (!bin) {
 		return NULL;
@@ -723,9 +752,9 @@ RBinWasmObj *r_bin_wasm_init (RBinFile *arch) {
 		free (bin);
 		return NULL;
 	}
-	bin->size = (ut32)arch->buf->length;
-	if (!r_buf_set_bytes (bin->buf, arch->buf->buf, bin->size)) {
-		r_bin_wasm_destroy (arch);
+	bin->size = (ut32)bf->buf->length;
+	if (!r_buf_set_bytes (bin->buf, bf->buf->buf, bin->size)) {
+		r_bin_wasm_destroy (bf);
 		free (bin);
 		return NULL;
 	}
@@ -735,7 +764,7 @@ RBinWasmObj *r_bin_wasm_init (RBinFile *arch) {
 	// but dependency problems when sections are disordered (against spec)
 
 	bin->g_types = r_bin_wasm_get_types (bin);
-	bin->g_imports = r_bin_wasm_get_imports (bin);	
+	bin->g_imports = r_bin_wasm_get_imports (bin);
 	bin->g_exports = r_bin_wasm_get_exports (bin);
 	bin->g_tables = r_bin_wasm_get_tables (bin);
 	bin->g_memories = r_bin_wasm_get_memories (bin);
@@ -749,14 +778,14 @@ RBinWasmObj *r_bin_wasm_init (RBinFile *arch) {
 	return bin;
 }
 
-void r_bin_wasm_destroy (RBinFile *arch) {
+void r_bin_wasm_destroy (RBinFile *bf) {
 	RBinWasmObj *bin;
 
-	if (!arch || !arch->o || !arch->o->bin_obj) {
+	if (!bf || !bf->o || !bf->o->bin_obj) {
 		return;
 	}
 
-	bin = arch->o->bin_obj;
+	bin = bf->o->bin_obj;
 	r_buf_free (bin->buf);
 
 	r_list_free (bin->g_sections);
@@ -772,7 +801,7 @@ void r_bin_wasm_destroy (RBinFile *arch) {
 
 	free (bin->g_start);
 	free (bin);
-	arch->o->bin_obj = NULL;
+	bf->o->bin_obj = NULL;
 }
 
 RList *r_bin_wasm_get_sections (RBinWasmObj *bin) {
@@ -896,7 +925,11 @@ RList *r_bin_wasm_get_sections (RBinWasmObj *bin) {
 			goto beach;
 		}
 		r_buf_seek (b, ptr->payload_len, R_IO_SEEK_CUR);
-		r_list_append (ret, ptr);
+		if (!r_list_append (ret, ptr)) {
+			free (ptr);
+			// should it jump to beach?
+		}
+		ptr = NULL;
 	}
 	bin->g_sections = ret;
 	return ret;
@@ -937,7 +970,7 @@ ut32 r_bin_wasm_get_entrypoint (RBinWasmObj *bin) {
 	if (!bin->g_codes) {
 		r_list_free (secs);
 		return 0;
-	}	
+	}
 	func = r_list_get_n (bin->g_codes, start->index);
 	r_list_free (secs);
 	return (ut32)(func? func->code: 0);

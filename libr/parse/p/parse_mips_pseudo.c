@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2012 - pancake */
+/* radare - LGPL - Copyright 2012-2017 - pancake */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -145,7 +145,7 @@ static int parse(RParse *p, const char *data, char *str) {
 
 	r_str_replace_char (buf, '(', ',');
 	r_str_replace_char (buf, ')', ' ');
-	r_str_chop (buf);
+	r_str_trim (buf);
 
 	if (*buf) {
 		w0[0]='\0';
@@ -201,11 +201,12 @@ static int parse(RParse *p, const char *data, char *str) {
 {
 	char *p = strdup (str);
 	p = r_str_replace (p, "+ -", "- ", 0);
-	p = r_str_replace(p, " + ]", " + 0]", 0);
-#if EXPERIMENTAL_ZERO
-	p = r_str_replace (p, "zero", "0", 0);
-	if (!memcmp (p, "0 = ", 4)) *p = 0; // nop
-#endif
+	p = r_str_replace (p, " + ]", " + 0]", 0);
+
+	p = r_str_replace (p, "zero", "0", 1);
+	if (!strncmp (p, "0 = ", 4)) {
+		*p = 0; // nop
+	}
 	if (!strcmp (w1, w2)) {
 		char a[32], b[32];
 #define REPLACE(x,y) \
@@ -361,7 +362,7 @@ RParsePlugin r_parse_plugin_mips_pseudo = {
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_PARSE,
 	.data = &r_parse_plugin_mips_pseudo,
 	.version = R2_VERSION

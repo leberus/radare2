@@ -1565,31 +1565,41 @@ static int replace(int argc, const char *argv[], char *newstr) {
 							switch(to) {
 								case 4:
 									w = "==";
+									break;
 								case 1:
 								case 8:
 									w = ">";
+									break;
 								case 5:
 								case 12:
 									w = ">=";
+									break;
 								case 2:
 								case 16:
 									w = "<";
+									break;
 								case 6:
 								case 20:
 									w = "<=";
+									break;
 								case 24:
 									w = "!=";
+									break;
 								case 31:
 									// If no parameters t[dw][i] 32, 0, 0 just TRAP
 									w = "==";
+									break;
+								default:
+									w = "?";
+									break;
 							}
-							w = cmask64("0", w);
+							w = cmask64 ("0", w);
 						} else if ((i == 44 && letter == 2) || (i == 45 && letter == 1)) { //spr
-							w = getspr(w);
+							w = getspr (w);
 						}
 						if (w != NULL) {
 							strcpy (newstr + k, w);
-							k += strlen(w) - 1;
+							k += strlen (w) - 1;
 						}
 					} else {
 						newstr[k] = ops[i].str[j];
@@ -1629,13 +1639,14 @@ static int parse(RParse *p, const char *data, char *str) {
 	}
 
 	// malloc can be slow here :?
-	if (!(buf = malloc (len + 1)))
+	if (!(buf = malloc (len + 1))) {
 		return false;
+	}
 	memcpy (buf, data, len + 1);
 
 	r_str_replace_char (buf, '(', ',');
 	r_str_replace_char (buf, ')', ' ');
-	r_str_chop (buf);
+	r_str_trim (buf);
 	if (*buf) {
 		w0[0] = '\0';
 		w1[0] = '\0';
@@ -1732,14 +1743,14 @@ static int parse(RParse *p, const char *data, char *str) {
 	return true;
 }
 
-struct r_parse_plugin_t r_parse_plugin_ppc_pseudo = {
+RParsePlugin r_parse_plugin_ppc_pseudo = {
 	.name = "ppc.pseudo",
 	.desc = "PowerPC pseudo syntax",
 	.parse = parse,
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_PARSE,
 	.data = &r_parse_plugin_ppc_pseudo,
 	.version = R2_VERSION

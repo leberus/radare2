@@ -7,8 +7,8 @@ include ../mk/${COMPILER}.mk
 DESTDIR:=$(DESTDIR)
 PREFIX?=${PWD}/../prefix
 
-
-
+S=$
+B=`
 PWD=$(shell pwd)
 
 LIBS0=util hash
@@ -18,82 +18,43 @@ LIBS3=fs anal bin parse
 LIBS4=asm
 LIBS5=egg
 LIBS6=debug
-#LIBS6+=print
 LIBS7=core
 
 LIBS=$(LIBS0) $(LIBS1) $(LIBS2) $(LIBS3) $(LIBS4) $(LIBS5) $(LIBS6) $(LIBS7)
 .PHONY: $(LIBS)
 
 all:
-	${MAKE} $(LIBS0)
-	${MAKE} $(LIBS1)
-	${MAKE} $(LIBS2)
-	${MAKE} $(LIBS3)
-	${MAKE} $(LIBS4)
-	${MAKE} $(LIBS5)
-	${MAKE} $(LIBS6)
-	${MAKE} $(LIBS7)
+	$(MAKE) $(LIBS0)
+	$(MAKE) $(LIBS1)
+	$(MAKE) $(LIBS2)
+	$(MAKE) $(LIBS3)
+	$(MAKE) $(LIBS4)
+	$(MAKE) $(LIBS5)
+	$(MAKE) $(LIBS6)
+	$(MAKE) $(LIBS7)
 ifeq (${WITHNONPIC},1)
-	${MAKE} libr.${EXT_AR}
+	$(MAKE) libr.${EXT_AR}
 endif
 
-# looks hacky :D
-#AR=arm-linux-androideabi-ar
+libr.${EXT_SO}:
+	rm -rf .libr/tcc # WHY
+	$(CC) $(LDFLAGS) -shared -dynamic -arch arm64 -o libr.${EXT_SO} .libr/*/*.o ../shlr/gdb/lib/libgdbr.a
 
-S=$
-B=`
-libr.${EXT_AR}:
+libr.${EXT_AR}: $(wildcard */libr_*.${EXT_AR}) $(shell find ../shlr -name '*.${EXT_AR}')
 	rm -rf .libr
 	mkdir .libr
-	for FILE in */libr_*.${EXT_AR} ../shlr/*/*.${EXT_AR} ; do \
-		F=${B}basename $$FILE${B} ; \
-		Q=${B}dirname $$FILE${B} ; \
-		D=${B}basename $$Q${B} ; \
-		mkdir -p .libr/$$D ; \
-		cp -f $$FILE .libr/$$D/$$F ; \
-		ls -l .libr/$$D/$$F ; \
-		(cd .libr/$$D && ${AR} x $$F || true ) ; \
+	for LIB in $^ ; do \
+		${PARTIALLD} -o .libr/$$(basename $${LIB} .a).o $${LIB} ; \
 	done
-	echo lets ar
-	cd .libr ; ${AR} qv libr.${EXT_AR} `find * -iname *.${EXT_AR} 2> /dev/null`
-	echo lets m
-	mv .libr/libr.${EXT_AR} libr.${EXT_AR}
-	echo ranlibin
-	${RANLIB} libr.${EXT_AR}
-	rm -rf .libr
-
-__AR=xcrun --sdk iphoneos ar
-__RANLIB=xcrun --sdk iphoneos ranlib
-a:
-	rm -rf .libr
-	mkdir .libr
-	for FILE in */libr_*.${EXT_AR} ; do \
-		mkdir -p .libr/$$FILE ; \
-		cp -f $$FILE .libr/$$FILE ; \
-		(cd .libr/$$FILE ; ${__AR} x *.${EXT_AR} ; rm -f *.${EXT_AR} ) ; \
-		done
-	cd .libr ; ${__AR} qv libr.${EXT_AR} `find * -iname *.o`
-	mv .libr/libr.${EXT_AR} libr.${EXT_AR}
-	${__RANLIB} libr.${EXT_AR}
-	lipo -info libr.${EXT_AR}
-	rm -rf .libr
-
-gnu_libr.${EXT_AR}: $(shell ls */libr_*.${EXT_AR} 2>/dev/null)
-	rm -f libr.
-	echo CREATE libr.${EXT_AR} > libr.m
-	for FILE in */libr_*.${EXT_AR} ; do echo ADDLIB $$FILE >> libr.m ; done
-	echo SAVE >> libr.m
-	# ar -M is a gnu-ism .. try to find a proper portable way to do that
-	${CC_AR} -M < libr.m
-	rm -f libr.m
+	${AR} crs $@ .libr/*.o
 
 $(LIBS):
 	@echo "DIR $@"
-	@${MAKE} -C $@
+	@$(MAKE) -C $@
 
 pkgcfg:
-	@for lib in ${LIBS}; do ( cd $${lib} && ${MAKE} pkgcfg ); done
-	cd asm && ${MAKE} pkgcfg NAME=libr DEPS="r_`echo ${LIBS}|sed -e 's, , r_,g'`"
+	@for lib in ${LIBS}; do $(MAKE) -C $${lib} pkgcfg; done
+	$(MAKE) -C asm pkgcfg NAME=libr DEPS="r_`echo ${LIBS}|sed -e 's, , r_,g'`"
 	# TODO: Magically generate libr.pc.acr here using LIBS and so :)
 
 install-pkgconfig:
@@ -124,18 +85,14 @@ install-includes:
 	done)
 
 symstall install-symlink:
+	@cd .. && \
 	mkdir -p "${DESTDIR}${BINDIR}" \
 		"${DESTDIR}${INCLUDEDIR}" \
 		"${DESTDIR}${LIBDIR}/pkgconfig" \
-		"${DESTDIR}${LIBDIR}/radare2/${VERSION}"
-	rm -rf "${DESTDIR}${INCLUDEDIR}/libr" && ln -fs "${PWD}/include" "${DESTDIR}${INCLUDEDIR}/libr"
-	cd ../pkgcfg && for FILE in *.pc ; do \
-		if [ -e "${PWD}/../pkgcfg/$${FILE}" ] ; then \
-			ln -fs "${PWD}/../pkgcfg/$${FILE}" \
-				"${DESTDIR}${LIBDIR}/pkgconfig/$${FILE}" ; \
-		fi ; \
-	done
-	@$(foreach lib,${LIBS}, \
+		"${DESTDIR}${LIBDIR}/radare2/${VERSION}" ; \
+	rm -rf "${DESTDIR}${INCLUDEDIR}/libr" && ln -fs "${PWD}/include" "${DESTDIR}${INCLUDEDIR}/libr" ; \
+	$(MAKE) install-pkgconfig-symlink ; \
+	$(foreach lib,${LIBS}, \
 	  ln -fs "${PWD}/$(lib)/libr_$(lib).${EXT_SO}" \
 		"${DESTDIR}${LIBDIR}/libr_$(lib).${EXT_SO}" ; \
 	  ln -fs "${PWD}/$(lib)/libr_$(lib).${EXT_SO}" \
@@ -144,7 +101,7 @@ symstall install-symlink:
 	  $(foreach module,$(wildcard $(lib)/p/*.${EXT_SO}), \
 	    ln -fs "${PWD}/$(module)" "${DESTDIR}${LIBDIR}/radare2/${VERSION}/" ; \
 	  ) \
-	)
+	) \
 	cd "${DESTDIR}${LIBDIR}/radare2" ; rm -f last ; ln -fs "${VERSION}" last
 
 install: install-includes install-pkgconfig
@@ -212,10 +169,11 @@ deinstall uninstall:
 	@echo libr aka radare2 has been uninstalled from PREFIX=${DESTDIR}${PREFIX}
 
 clean:
-	for LIB in ${LIBS}; do ( cd $${LIB} && ${MAKE} clean ); done
+	for LIB in ${LIBS}; do ( cd $${LIB} && $(MAKE) clean ); done
 
 mrproper:
-	for LIB in ${LIBS}; do ( cd $${LIB} && ${MAKE} mrproper ); done
+	rm -rf .libr libr.${LIB_SO} libr.${LIB_AR}
+	for LIB in ${LIBS}; do ( cd $${LIB} && $(MAKE) mrproper ); done
 
 .PHONY: sloc mrproper clean pkgcfg install deinstall uninstall libr
 .PHONY: install-includes install-pkgconfig install-symlink all

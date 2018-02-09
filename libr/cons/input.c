@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2016 - pancake */
+/* radare - LGPL - Copyright 2009-2017 - pancake */
 
 #include <r_cons.h>
 #include <string.h>
@@ -33,9 +33,8 @@ static int is_fd_ready(int fd) {
 R_API int r_cons_controlz(int ch) {
 #if __UNIX__
 	if (ch == 0x1a) {
-		r_cons_set_raw (0);
-		r_cons_show_cursor (1);
-		r_cons_enable_mouse (0);
+		r_cons_show_cursor (true);
+		r_cons_enable_mouse (false);
 		r_sys_stop ();
 		return 0;
 	}
@@ -97,10 +96,13 @@ R_API int r_cons_arrow_to_hjkl(int ch) {
 	case 0x06: ch='l'; break; // emacs right (ctrl + f)
 	case 0x02: ch='h'; break; // emacs left (ctrl + b)
 	}
-	if (ch != 0x1b)
+	if (ch != 0x1b) {
 		return ch;
+	}
 	ch = r_cons_readchar ();
-	if (!ch) return 0;
+	if (!ch) {
+		return 0;
+	}
 	switch (ch) {
 	case 0x1b:
 		ch = 'q'; // XXX: must be 0x1b (R_CONS_KEY_ESC)
@@ -212,8 +214,8 @@ R_API int r_cons_fgets(char *buf, int len, int argc, const char **argv) {
 	RCons *cons = r_cons_singleton ();
 	int ret = 0, color = cons->pal.input && *cons->pal.input;
 	if (cons->echo) {
-		r_cons_set_raw (0);
-		r_cons_show_cursor (1);
+		r_cons_set_raw (false);
+		r_cons_show_cursor (true);
 	}
 #if 0
 	int mouse = r_cons_enable_mouse (false);
@@ -272,7 +274,7 @@ R_API int r_cons_any_key(const char *msg) {
 }
 
 #if __WINDOWS__ && !__CYGWIN__
-static int readchar_win() {
+static int readchar_win(ut32 usec) {
 	int ch=0;
 	BOOL ret;
 	BOOL bCtrl = FALSE;
@@ -284,6 +286,11 @@ do_it_again:
 	h = GetStdHandle (STD_INPUT_HANDLE);
 	GetConsoleMode (h, &mode);
 	SetConsoleMode (h, 0 | ENABLE_MOUSE_INPUT); // RAW
+	if (usec) {
+		if (WaitForSingleObject (h, usec) == WAIT_TIMEOUT) {
+			return -1;
+		}
+	}
 	ret = ReadConsoleInput (h, irInBuf, 128, &out);
 	if (ret) {
 		for (i = 0; i < out; i++) {
@@ -302,19 +309,13 @@ do_it_again:
 					ch=irInBuf[i].Event.KeyEvent.uChar.AsciiChar;
 					bCtrl=irInBuf[i].Event.KeyEvent.dwControlKeyState & 8;
 					if (irInBuf[i].Event.KeyEvent.uChar.AsciiChar==0) {
-						ch=0;
+						ch = 0;
 						switch (irInBuf[i].Event.KeyEvent.wVirtualKeyCode) {
 						case VK_DOWN: // key down
-							if (bCtrl)
-								ch='J';
-							else
-								ch='j';
+							ch = bCtrl ? 'J': 'j';
 							break;
 						case VK_RIGHT: // key right
-							if (bCtrl)
-								ch='L';
-							else
-								ch='l';
+							ch = bCtrl ? 'L': 'l';
 							break;
 						case VK_UP: // key up
 							if (bCtrl)
@@ -423,8 +424,9 @@ do_it_again:
 	}
 	FlushConsoleInputBuffer(h);
 	SetConsoleMode (h, mode);
-	if (ch==0)
+	if (ch == 0) {
 		goto do_it_again;
+	}
 	/*r_cons_gotoxy (1, 2);
 	r_cons_printf ("\n");
 	r_cons_printf ("| buf = %x |\n", ch);
@@ -434,12 +436,34 @@ do_it_again:
 	return  ch;
 }
 #endif
+
+R_API int r_cons_readchar_timeout(ut32 usec) {
+#if __UNIX__
+	struct timeval tv;
+	fd_set fdset, errset;
+	FD_ZERO (&fdset);
+	FD_ZERO (&errset);
+	FD_SET (0, &fdset);
+	tv.tv_sec = 0; // usec / 1000;
+	tv.tv_usec = 1000 * usec;
+	r_cons_set_raw (1);
+	if (select (1, &fdset, NULL, &errset, &tv) == 1) {
+		return r_cons_readchar ();
+	}
+	r_cons_set_raw (0);
+	// timeout
+	return -1;
+#else
+	return  readchar_win (usec);
+#endif
+}
+
 R_API int r_cons_readchar() {
 	char buf[2];
 	buf[0] = -1;
 #if __WINDOWS__ && !__CYGWIN__ //&& !MINGW32
 	#if 1   // if something goes wrong set this to 0. skuater.....
-	return readchar_win();
+	return readchar_win(0);
 	#endif
 	BOOL ret;
 	DWORD out;
@@ -448,15 +472,17 @@ R_API int r_cons_readchar() {
 	GetConsoleMode (h, &mode);
 	SetConsoleMode (h, 0); // RAW
 	ret = ReadConsole (h, buf, 1, &out, NULL);
-	FlushConsoleInputBuffer(h);
-	if (!ret)
+	FlushConsoleInputBuffer (h);
+	if (!ret) {
 		return -1;
+	}
 	SetConsoleMode (h, mode);
 #else
 	r_cons_set_raw (1);
-	if (read (0, buf, 1)==-1)
+	if (read (0, buf, 1) == -1) {
 		return -1;
-	//r_cons_set_raw (0);
+	}
+	r_cons_set_raw (0);
 #endif
 	return r_cons_controlz (buf[0]);
 }
@@ -468,13 +494,13 @@ R_API int r_cons_yesno(int def, const char *fmt, ...) {
 	vfprintf (stderr, fmt, ap);
 	va_end (ap);
 	fflush (stderr);
-	r_cons_set_raw (1);
+	r_cons_set_raw (true);
 	(void)read (0, &key, 1);
 	write (2, "\n", 1);
 	if (key == 'Y') {
 		key = 'y';
 	}
-	r_cons_set_raw (0);
+	r_cons_set_raw (false);
 	if (key == '\n' || key == '\r') {
 		key = def;
 	}

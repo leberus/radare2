@@ -1,4 +1,4 @@
-/* Copyright radare2 2014-2016 - Author: pancake */
+/* Copyright radare2 2014-2017 - Author: pancake */
 
 // pls move the typedefs into roons and rename it -> RConsPanel
 
@@ -159,7 +159,11 @@ static void Panel_print(RConsCanvas *can, Panel *n, int cur) {
 			white[idx] = 0;
 			text = r_str_ansi_crop (foo,
 				0, delta_y, n->w + delta_x - 2, n->h - 2 + delta_y);
-			text = r_str_prefix_all (text, white);
+			char *newText = r_str_prefix_all (text, white);
+			if (newText) {
+				free (text);
+				text = newText;
+			}
 		} else {
 			text = r_str_ansi_crop (foo,
 				delta_x, delta_y, n->w + delta_x - 2, n->h - 2 + delta_y);
@@ -406,10 +410,12 @@ static void r_core_panels_refresh(RCore *core) {
 		curnode = menu_pos;
 	}
 	// redraw current node to make it appear on top
-	if (curnode >= 0) {
-		Panel_print (can, &panels[curnode], 1);
+	if (panels) {
+		if (curnode >= 0) {
+			Panel_print (can, &panels[curnode], 1);
+		}
+		Panel_print (can, &panels[menu_pos], menu_y);
 	}
-	Panel_print (can, &panels[menu_pos], menu_y);
 
 	(void) G (-can->sx, -can->sy);
 	title[0] = 0;
@@ -727,6 +733,9 @@ repeat:
 			} else if (strstr (action, "Step Over")) {
 				r_core_cmd (core, "dso", 0);
 				r_cons_flush ();
+			} else if (strstr (action, "Continue")) {
+				r_core_cmd (core, "dc", 0);
+				r_cons_flush ();
 			} else if (strstr (action, "Breakpoints")) {
 				addPanelFrame ("Breakpoints", "db", 0);
 			} else if (strstr (action, "Symbols")) {
@@ -827,6 +836,10 @@ repeat:
 		core->vmode = false;
 		r_core_visual_prompt_input (core);
 		core->vmode = true;
+
+		// FIX: Issue with visual mode instruction highlighter
+		// not updating after 'ds' or 'dcu' commands.
+		r_core_cmd0 (core, ".dr*");
 		break;
 	case 'C':
 		can->color = !can->color;                               // WTF
@@ -888,6 +901,7 @@ repeat:
 			menu_x = 0;
 		}
 		break;
+	case 'Z': // SHIFT-TAB
 	case 'K':
 		menu_y = 0;
 		menu_x = -1;

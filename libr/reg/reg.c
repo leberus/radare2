@@ -12,7 +12,7 @@ static const char* types[R_REG_TYPE_LAST + 1] = {
 	"gpr", "drx", "fpu", "mmx", "xmm", "flg", "seg", NULL
 };
 
-// Take the 32bits name of a regester, and return the 64 bit name of it.
+// Take the 32bits name of a register, and return the 64 bit name of it.
 // If there is no equivalent 64 bit register return NULL.
 R_API const char* r_reg_32_to_64(RReg* reg, const char* rreg32) {
 	// OMG this is shit...
@@ -53,7 +53,6 @@ R_API int r_reg_type_by_name(const char* str) {
 	if (!strcmp (str, "all")) {
 		return R_REG_TYPE_ALL;
 	}
-	eprintf ("Unknown register type: '%s'\n", str);
 	return -1;
 }
 
@@ -72,16 +71,14 @@ R_API int r_reg_get_name_idx(const char* type) {
 	case 'Z' + ('F' << 8): return R_REG_NAME_ZF;
 	case 'S' + ('F' << 8): return R_REG_NAME_SF;
 	case 'C' + ('F' << 8): return R_REG_NAME_CF;
-	case 'O' + ('F' << 8):
-		return R_REG_NAME_OF;
+	case 'O' + ('F' << 8): return R_REG_NAME_OF;
 	/* gpr */
 	case 'P' + ('C' << 8): return R_REG_NAME_PC;
 	case 'S' + ('R' << 8): return R_REG_NAME_SR;
 	case 'L' + ('R' << 8): return R_REG_NAME_LR;
 	case 'S' + ('P' << 8): return R_REG_NAME_SP;
 	case 'B' + ('P' << 8): return R_REG_NAME_BP;
-	case 'S' + ('N' << 8):
-		return R_REG_NAME_SN;
+	case 'S' + ('N' << 8): return R_REG_NAME_SN;
 	/* args */
 	case 'A' + ('0' << 8): return R_REG_NAME_A0;
 	case 'A' + ('1' << 8): return R_REG_NAME_A1;

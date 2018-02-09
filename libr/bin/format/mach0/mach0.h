@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2010-2016 - pancake, nibble */
+/* radare - LGPL - Copyright 2010-2017 - pancake, nibble */
 
 #include <r_bin.h>
 #include <r_types.h>
@@ -22,6 +22,7 @@ struct section_t {
 	ut64 offset;
 	ut64 addr;
 	ut64 size;
+	ut64 vsize;
 	ut32 align;
 	ut32 flags;
 	int srwx;
@@ -68,7 +69,7 @@ struct lib_t {
 struct blob_index_t {
 	ut32 type;
 	ut32 offset;
-}; 
+};
 
 struct blob_t {
 	ut32 magic;
@@ -79,7 +80,7 @@ struct super_blob_t {
 	struct blob_t blob;
 	ut32 count;
 	struct blob_index_t index[];
-}; 
+};
 
 struct MACH0_(obj_t) {
 	struct MACH0_(mach_header) hdr;
@@ -152,15 +153,15 @@ int MACH0_(is_pie)(struct MACH0_(obj_t)* bin);
 int MACH0_(has_nx)(struct MACH0_(obj_t)* bin);
 const char* MACH0_(get_intrp)(struct MACH0_(obj_t)* bin);
 const char* MACH0_(get_os)(struct MACH0_(obj_t)* bin);
-char* MACH0_(get_cputype)(struct MACH0_(obj_t)* bin);
+const char* MACH0_(get_cputype)(struct MACH0_(obj_t)* bin);
 char* MACH0_(get_cpusubtype)(struct MACH0_(obj_t)* bin);
 char* MACH0_(get_cpusubtype_from_hdr)(struct MACH0_(mach_header) *hdr);
 char* MACH0_(get_filetype)(struct MACH0_(obj_t)* bin);
 char* MACH0_(get_filetype_from_hdr)(struct MACH0_(mach_header) *hdr);
 ut64 MACH0_(get_main)(struct MACH0_(obj_t)* bin);
-char* MACH0_(get_cputype_from_hdr)(struct MACH0_(mach_header) *hdr);
+const char* MACH0_(get_cputype_from_hdr)(struct MACH0_(mach_header) *hdr);
 int MACH0_(get_bits_from_hdr)(struct MACH0_(mach_header)* hdr);
 struct MACH0_(mach_header)* MACH0_(get_hdr_from_bytes)(RBuffer *buf);
-void MACH0_(mach_headerfields)(RBinFile *arch);
-RList* MACH0_(mach_fields)(RBinFile *arch);
+void MACH0_(mach_headerfields)(RBinFile *bf);
+RList* MACH0_(mach_fields)(RBinFile *bf);
 #endif

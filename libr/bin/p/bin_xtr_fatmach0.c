@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2016 - nibble, pancake */
+/* radare - LGPL - Copyright 2009-2018 - nibble, pancake */
 
 #include <r_types.h>
 #include <r_util.h>
@@ -58,7 +58,7 @@ static int size(RBin *bin) {
 }
 
 static inline void fill_metadata_info_from_hdr(RBinXtrMetadata *meta, struct MACH0_(mach_header) *hdr) {
-	meta->arch = MACH0_(get_cputype_from_hdr) (hdr);
+	meta->arch = strdup (MACH0_(get_cputype_from_hdr) (hdr));
 	meta->bits = MACH0_(get_bits_from_hdr) (hdr);
 	meta->machine = MACH0_(get_cpusubtype_from_hdr) (hdr);
 	meta->type = MACH0_(get_filetype_from_hdr) (hdr);
@@ -182,8 +182,8 @@ static RList * oneshotall(RBin *bin, const ut8 *buf, ut64 size) {
 	return res;
 }
 
-RBinXtrPlugin r_bin_xtr_plugin_fatmach0 = {
-	.name = "fatmach0",
+RBinXtrPlugin r_bin_xtr_plugin_xtr_fatmach0 = {
+	.name = "xtr.fatmach0",
 	.desc = "fat mach0 bin extractor plugin",
 	.license = "LGPL3",
 	.load = &load,

@@ -23,10 +23,10 @@ static int disassemble(RAsm *a, RAsmOp *op, const ut8 *buf, int len) {
 			mode |= CS_MODE_MIPS32R6;
 		} else if (!strcmp (a->cpu, "v3")) {
 			mode |= CS_MODE_MIPS3;
-//		} else if (!strcmp (a->cpu, "gp64")) {
-//			a->bits = 64;
-		} else if (!strcmp (a->cpu, "64v2")) {
-			mode |= CS_MODE_MIPS32 | CS_MODE_MIPS64;
+		} else if (!strcmp (a->cpu, "v2")) {
+#if CS_API_MAJOR > 3
+			mode |= CS_MODE_MIPS2;
+#endif
 		}
 	}
 	mode |= (a->bits == 64)? CS_MODE_MIPS64 : CS_MODE_MIPS32;
@@ -87,7 +87,7 @@ RAsmPlugin r_asm_plugin_mips_cs = {
 	.desc = "Capstone MIPS disassembler",
 	.license = "BSD",
 	.arch = "mips",
-	.cpus = "gp64,micro,r6,v3",
+	.cpus = "mips32/64,micro,r6,v3,v2",
 	.bits = 16|32|64,
 	.endian = R_SYS_ENDIAN_LITTLE | R_SYS_ENDIAN_BIG,
 	.disassemble = &disassemble,
@@ -96,7 +96,7 @@ RAsmPlugin r_asm_plugin_mips_cs = {
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_ASM,
 	.data = &r_asm_plugin_mips_cs,
 	.version = R2_VERSION

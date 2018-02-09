@@ -149,7 +149,7 @@ R_API void r_config_list(RConfig *cfg, const char *str, int rad) {
 	bool isFirst = false;
 
 	if (!STRNULL (str)) {
-		str = r_str_chop_ro (str);
+		str = r_str_trim_ro (str);
 		len = strlen (str);
 		if (len > 0 && str[0] == 'j') {
 			str++;
@@ -187,6 +187,42 @@ R_API void r_config_list(RConfig *cfg, const char *str, int rad) {
 						node->desc? node->desc: "");
 				}
 			}
+		}
+		break;
+	case 's':
+		if (str && *str) {
+			r_list_foreach (cfg->nodes, iter, node) {
+				char *space = strdup (node->name);
+				char *dot = strchr (space, '.');
+				if (dot) {
+					*dot = 0;
+				}
+				if (!strcmp (str, space)) {
+					cfg->cb_printf ("%s\n", dot + 1);
+				}
+				free (space);
+			}
+		} else {
+			char *oldSpace = NULL;
+			r_list_foreach (cfg->nodes, iter, node) {
+				char *space = strdup (node->name);
+				char *dot = strchr (space, '.');
+				if (dot) {
+					*dot = 0;
+				}
+				if (oldSpace) {
+					if (!strcmp (space, oldSpace)) {
+						free (space);
+						continue;
+					}
+					free (oldSpace);
+					oldSpace = space;
+				} else {
+					oldSpace = space;
+				}
+				cfg->cb_printf ("%s\n", space);
+			}
+			free (oldSpace);
 		}
 		break;
 	case 'v':
@@ -303,6 +339,9 @@ R_API ut64 r_config_get_i(RConfig *cfg, const char *name) {
 		if (node->i_value || !strcmp (node->value, "false")) {
 			return node->i_value;
 		}
+		if (!strcmp (node->value, "true")) {
+			return 1;
+		}
 		return (ut64) r_num_math (cfg->num, node->value);
 	}
 	return (ut64) 0LL;
@@ -388,8 +427,9 @@ R_API RConfigNode* r_config_set(RConfig *cfg, const char *name, const char *valu
 				if (node->value == value) {
 					goto beach;
 				}
-				free (node->value);
+				char *tmp = node->value;
 				node->value = strdup (value);
+				free (tmp);
 				if (IS_DIGIT (*value)) {
 					if (strchr (value, '/')) {
 						node->i_value = r_num_get (cfg->num, value);
@@ -551,7 +591,7 @@ R_API int r_config_eval(RConfig *cfg, const char *str) {
 		return false;
 	}
 	memcpy (name, str, len);
-	str = r_str_chop (name);
+	str = r_str_trim (name);
 
 	if (!str) {
 		return false;
@@ -571,11 +611,11 @@ R_API int r_config_eval(RConfig *cfg, const char *str) {
 	if (ptr) {
 		/* set */
 		ptr[0] = '\0';
-		a = r_str_chop (name);
-		b = r_str_chop (ptr + 1);
+		a = r_str_trim (name);
+		b = r_str_trim (ptr + 1);
 		(void) r_config_set (cfg, a, b);
 	} else {
-		char *foo = r_str_chop (name);
+		char *foo = r_str_trim (name);
 		if (foo[strlen (foo) - 1] == '.') {
 			r_config_list (cfg, name, 0);
 			return false;

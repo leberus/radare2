@@ -316,7 +316,7 @@ static RList *r_io_zip_open_many(RIO *io, const char *file, int rw, int mode) {
 
 		if (zfo) {
 			zfo->io_backref = io;
-			res = r_io_desc_new (&r_io_plugin_zip, zfo->fd,
+			res = r_io_desc_new (io, &r_io_plugin_zip,
 				zfo->name, rw, mode, zfo);
 		}
 		r_list_append (list_fds, res);
@@ -356,8 +356,8 @@ char * r_io_zip_get_by_file_idx(const char * archivename, const char *idx, ut32 
 }
 
 static RIODesc *r_io_zip_open(RIO *io, const char *file, int rw, int mode) {
-	RIODesc *res = NULL;
-	char *pikaboo;
+	RIODesc *res = NULL;	
+	char *pikaboo, *tmp;
 	RIOZipFileObj *zfo = NULL;
 	char *zip_uri = NULL, *zip_filename = NULL, *filename_in_zipfile = NULL;
 
@@ -365,10 +365,13 @@ static RIODesc *r_io_zip_open(RIO *io, const char *file, int rw, int mode) {
 		return NULL;
 	}
 	zip_uri = strdup (file);
-	if (!zip_uri) return NULL;
+	if (!zip_uri) {
+		return NULL;
+	}
 	pikaboo = strstr (zip_uri, "://");
 	if (pikaboo) {
-		zip_filename = strstr (pikaboo + 3, "//");
+		tmp = strstr (pikaboo + 3, "//");
+		zip_filename = tmp ? strdup (tmp) : NULL;
 		// 1) Tokenize to the '//' and find the base file directory ('/')
 		if (!zip_filename) {
 			if (!strncmp (zip_uri, "apk://", 6)) {
@@ -377,7 +380,7 @@ static RIODesc *r_io_zip_open(RIO *io, const char *file, int rw, int mode) {
 				RList *files = NULL;
 				RListIter *iter;
 				char *name;
-				zip_filename = pikaboo + 3;
+				zip_filename = strdup (pikaboo + 3);
 				files = r_io_zip_get_files (zip_filename, 0, mode, rw );
 
 				if (files) {
@@ -386,24 +389,30 @@ static RIODesc *r_io_zip_open(RIO *io, const char *file, int rw, int mode) {
 						char *bin_name = strstr (name, ".app/");
 						if (bin_name) {
 							const char *slash = r_str_rchr (name, bin_name, '/');
-							bin_name = r_str_ndup (slash + 1, (bin_name - slash) -1);
-							char *chkstr = r_str_newf ("Payload/%s.app/%s", bin_name);
-							if (!strcmp (name, chkstr)) {
-								zip_filename = r_str_newf ("//%s", chkstr);
+							if (slash) {
+								bin_name = r_str_ndup (slash + 1, (bin_name - slash) -1);
+								char *chkstr = r_str_newf ("Payload/%s.app/%s", bin_name, bin_name);
+								if (!strcmp (name, chkstr)) {
+									zip_filename = r_str_newf ("//%s", chkstr);
+									free (chkstr);
+									free (bin_name);
+									break;
+								}
 								free (chkstr);
 								free (bin_name);
-								break;
 							}
-							free (chkstr);
-							free (bin_name);
 						}
 					}
+					r_list_free (files);
 				}
 			} else {
-				zip_filename = pikaboo + 1;
+				zip_filename = strdup (pikaboo + 1);
 			}
+		} else {
+			zip_filename = strdup (pikaboo + 1);
 		}
 	}
+	tmp = zip_filename;
 	if (zip_filename && zip_filename[1] && zip_filename[2]) {
 		if (zip_filename[0] && zip_filename[0] == '/' &&
 			zip_filename[1] && zip_filename[1] == '/' ) {
@@ -428,6 +437,7 @@ static RIODesc *r_io_zip_open(RIO *io, const char *file, int rw, int mode) {
 				ZIP_CREATE, mode, rw);
 		} else {
 			filename_in_zipfile = r_str_newf ("%s", zip_filename);
+			R_FREE (tmp);
 			zip_filename = strdup (pikaboo + 3);
 			if (!strcmp (zip_filename, filename_in_zipfile)) {
 				//R_FREE (zip_filename);
@@ -451,7 +461,6 @@ static RIODesc *r_io_zip_open(RIO *io, const char *file, int rw, int mode) {
 		char *name;
 		//eprintf("usage: zip:///path/to/archive//filepath\n");
 		files = r_io_zip_get_files (zip_filename, 0, mode, rw);
-		files = r_io_zip_get_files (zip_filename, 0, mode, rw);
 		if (files) {
 			ut32 i = 0;
 			r_list_foreach (files, iter, name) {
@@ -473,20 +482,21 @@ static RIODesc *r_io_zip_open(RIO *io, const char *file, int rw, int mode) {
 			eprintf ("Warning: File did not exist, creating a new one.\n");
 		}
 		zfo->io_backref = io;
-		res = r_io_desc_new (&r_io_plugin_zip, zfo->fd,
+		res = r_io_desc_new (io, &r_io_plugin_zip,
 			zfo->name, rw, mode, zfo);
 	}
 
 	if (!res) {
 		eprintf ("Failed to open the archive %s and file %s\n",
 			zip_filename, filename_in_zipfile);
-		//free (zfo); zfo is already freed by r_io_desc_new
+		//free (zfo); zfo is already freed by r_io_desc_new	//WTF
 		r_io_desc_free (res);
 		res = NULL;
 	}
 done:
 	free (filename_in_zipfile);
 	free (zip_uri);
+	free (tmp);
 	return res;
 }
 
@@ -637,7 +647,7 @@ RIOPlugin r_io_plugin_zip = {
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_IO,
 	.data = &r_io_plugin_zip,
 	.version = R2_VERSION

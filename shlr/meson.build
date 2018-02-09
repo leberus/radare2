@@ -7,7 +7,7 @@ libr2bochs = static_library('libr2bochs', bochs_files,
     'bochs/include'
   ])]
 )
-  
+
 
 gdb_files=[
 'gdb/src/arch.c',
@@ -18,6 +18,7 @@ gdb_files=[
 
 'gdb/src/gdbclient/core.c',
 'gdb/src/gdbclient/responses.c',
+'gdb/src/gdbclient/xml.c',
 
 'gdb/src/gdbserver/core.c',
 ]
@@ -62,14 +63,14 @@ tcc_files=[
 'tcc/libtcc.c',
 'tcc/tccgen.c',
 'tcc/tccpp.c'
-]  
+]
 
 libr2tcc = static_library('libr2tcc', tcc_files,
   include_directories: [platform_inc, include_directories([
     'tcc'
   ])]
 )
-  
+
 spp_files=[
   'spp/spp.c'
 ]
@@ -80,7 +81,7 @@ libr2spp = static_library('libr2spp', spp_files,
   ])],
   c_args: ['-DHAVE_R_UTIL']
 )
-  
+
 sdb_files=[
 'sdb/src/array.c',
 'sdb/src/base64.c',
@@ -111,6 +112,16 @@ libr2sdb = static_library('libr2sdb', sdb_files,
   ])]
 )
 
+lz4_files=[
+'lz4/lz4.c',
+]
+
+libr2lz4 = static_library('libr2lz4', lz4_files,
+  include_directories: [platform_inc, include_directories([
+    'lz4'
+  ])]
+)
+
 zlib_files=[
 'zip/zip/zip_add.c',
 'zip/zip/zip_add_dir.c',
@@ -123,7 +134,7 @@ zlib_files=[
 'zip/zip/zip_entry.c',
 'zip/zip/zip_err_str.c',
 'zip/zip/zip_error.c',
-'zip/zip/zip_error_clear.c',
+#'zip/zip/zip_error_clear.c',
 'zip/zip/zip_error_get.c',
 'zip/zip/zip_error_get_sys_type.c',
 'zip/zip/zip_error_strerror.c',
@@ -133,7 +144,7 @@ zlib_files=[
 'zip/zip/zip_fclose.c',
 'zip/zip/zip_fdopen.c',
 'zip/zip/zip_file_add.c',
-'zip/zip/zip_file_error_clear.c',
+#'zip/zip/zip_file_error_clear.c',
 'zip/zip/zip_file_error_get.c',
 'zip/zip/zip_file_get_comment.c',
 'zip/zip/zip_file_get_offset.c',
@@ -290,7 +301,7 @@ libr2capstone = static_library('libr2capstone', cs_files,
     'capstone/include'
   ])
 )
-  
+
 grub_files=[
 'grub/fs/affs.c',
 #'grub/fs/afs.c',
@@ -351,16 +362,16 @@ libr2grub = static_library('libr2grub', grub_files,
   ])]
 )
 
-wind_files=[
-'wind/iob_pipe.c',
-'wind/kd.c',
-'wind/transport.c',
-'wind/wind.c',
+windbg_files=[
+'windbg/iob_pipe.c',
+'windbg/kd.c',
+'windbg/transport.c',
+'windbg/windbg.c',
 ]
 
-libr2wind = static_library('libr2wind', wind_files,
+libr2windbg = static_library('libr2windbg', windbg_files,
   include_directories: [platform_inc, include_directories([
-    'wind'
+    'windbg'
   ])]
 )
 
@@ -376,5 +387,15 @@ udis86_files=[
 libr2udis86 = static_library('libr2udis86', udis86_files,
   include_directories: [platform_inc, include_directories([
     'udis86'
+  ])]
+)
+
+ar_files=[
+'ar/ar.c'
+]
+
+libr2ar = static_library('libr2ar', ar_files,
+  include_directories: [platform_inc, include_directories([
+	'ar'
   ])]
 )

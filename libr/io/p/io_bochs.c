@@ -1,4 +1,4 @@
-// Copyright (c) 2016 - LGPL, SkUaTeR, All rights reserved.
+// Copyright (c) 2016-2017 - LGPL, SkUaTeR, All rights reserved.
 
 #include <r_io.h>
 #include <r_lib.h>
@@ -51,7 +51,7 @@ static RIODesc *__open(RIO *io, const char *file, int rw, int mode) {
 	// Inicializamos
 	if (bochs_open (&riob->desc, fileBochs, fileCfg) == true) {
 		desc = &riob->desc;
-		riobochs = r_io_desc_new (&r_io_plugin_bochs, -1, file, rw, mode, riob);
+		riobochs = r_io_desc_new (io, &r_io_plugin_bochs, file, rw, mode, riob);
 		//riogdb = r_io_desc_new (&r_io_plugin_gdb, riog->desc.sock->fd, file, rw, mode, riog);
 		free(fileBochs);
 		free(fileCfg);
@@ -90,7 +90,7 @@ static int __close(RIODesc *fd) {
 	return true;
 }
 	
-static int __system(RIO *io, RIODesc *fd, const char *cmd) {
+static char *__system(RIO *io, RIODesc *fd, const char *cmd) {
         lprintf ("system command (%s)\n", cmd);
         if (!strcmp (cmd, "help")) {
                 lprintf ("Usage: =!cmd args\n"
@@ -99,13 +99,11 @@ static int __system(RIO *io, RIODesc *fd, const char *cmd) {
 		lprintf ("io_system: Enviando comando bochs\n");
 		bochs_send_cmd (desc, &cmd[1], true);
 		io->cb_printf ("%s\n", desc->data);
-		return 1;
 	} else if (!strncmp (cmd, "dobreak", 7)) {
 		bochs_cmd_stop (desc);
 		io->cb_printf ("%s\n", desc->data);
-		return 1;
 	}         
-        return true;
+        return NULL;
 }
 
 RIOPlugin r_io_plugin_bochs = {
@@ -123,7 +121,7 @@ RIOPlugin r_io_plugin_bochs = {
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_IO,
 	.data = &r_io_plugin_bochs,
 	.version = R2_VERSION

@@ -27,9 +27,9 @@ R_API RStack *r_stack_newf(ut32 n, RStackFree f) {
 
 R_API void r_stack_free(RStack *s) {
 	if (s) {
-		if (s->free && s->top > 0) {
-			int i = 0;
-			for (i = 0; i < s->top; i++) {
+		if (s->free) {
+			int i;
+			for (i = 0; i <= s->top; i++) {
 				s->free (s->elems[i]);
 			}
 		}
@@ -70,4 +70,13 @@ R_API bool r_stack_is_empty(RStack *s) {
 
 R_API unsigned int r_stack_size(RStack *s) {
 	return (unsigned int)(s->top + 1);
+}
+
+R_API void *r_stack_peek(RStack *s) {
+	void *res;
+	if (!r_stack_is_empty (s)) {
+		res = s->elems[s->top];
+		return res;
+	}
+	return NULL;
 }

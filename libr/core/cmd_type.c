@@ -1,38 +1,134 @@
 /* radare - LGPL - Copyright 2009-2017 - pancake, oddcoder, Anton Kochkov, Jody Frankowski */
-#include <string.h>
 
+#include <string.h>
 #include "r_anal.h"
 #include "r_cons.h"
 #include "r_core.h"
 #include "sdb/sdb.h"
 
+static const char *help_msg_t[] = {
+	"Usage: t", "", "# cparse types commands",
+	"t", "", "List all loaded types",
+	"tj", "", "List all loaded types as json",
+	"t", " <type>", "Show type in 'pf' syntax",
+	"t*", "", "List types info in r2 commands",
+	"t-", " <name>", "Delete types by its name",
+	"t-*", "", "Remove all types",
+	//"t-!", "",          "Use to open $EDITOR",
+	"ta", " <type>", "Mark immediate as a type offset",
+	"tb", " <enum> <value>", "Show matching enum bitfield for given number",
+	"tc", " ([cctype])", "calling conventions listing and manipulations",
+	"te", "[?]", "List all loaded enums",
+	"te", " <enum> <value>", "Show name for given enum number",
+	"td", "[?] <string>", "Load types from string",
+	"tf", "", "List all loaded functions signatures",
+	"tk", " <sdb-query>", "Perform sdb query",
+	"tl", "[?]", "Show/Link type to an address",
+	//"to",  "",         "List opened files",
+	"tn", "[?] [-][addr]", "manage noreturn function attributes and marks",
+	"to", " -", "Open cfg.editor to load types",
+	"to", " <path>", "Load types from C header file",
+	"tos", " <path>", "Load types from parsed Sdb database",
+	"tp", " <type>  = <address>", "cast data at <address> to <type> and print it",
+	"ts", "[?]", "print loaded struct types",
+	"tu", "[?]", "print loaded union types",
+	//"| ts k=v k=v @ link.addr set fields at given linked type\n"
+	NULL
+};
+
+static const char *help_msg_t_minus[] = {
+	"Usage: t-", " <type>", "Delete type by its name",
+	NULL
+};
+
+static const char *help_msg_ta[] = {
+	"USAGE ta[...]", "", "",
+	"tas", " <offset>", "List all matching structure offsets",
+	"ta", " <struct member>", "Change immediate to structure offset",
+	"ta?", "", "show this help",
+	NULL
+};
+
+static const char *help_msg_tc[] = {
+	"USAGE tc[...]", " [cctype]", "",
+	"tc", "", "List all loaded structs",
+	"tc", " [cctype]", "Show convention rules for this type",
+	"tc=", "([cctype])", "Select (or show) default calling convention",
+	"tc-", "[cctype]", "TODO: remove given calling convention",
+	"tc+", "[cctype] ...", "TODO: define new calling convention",
+	"tcl", "", "List all the calling conventions",
+	"tcr", "", "Register telescoping using the calling conventions order",
+	"tcj", "", "json output (TODO)",
+	"tc?", "", "show this help",
+	NULL
+};
+
+static const char *help_msg_td[] = {
+	"Usage:", "\"td [...]\"", "",
+	"td", "[string]", "Load types from string",
+	NULL
+};
+
+static const char *help_msg_te[] = {
+	"USAGE te[...]", "", "",
+	"te", "", "List all loaded enums",
+	"te", " <enum> <value>", "Show name for given enum number",
+	"te?", "", "show this help",
+	NULL
+};
+
+static const char *help_msg_tl[] = {
+	"Usage:", "", "",
+	"tl", "", "list all links in readable format",
+	"tl", "[typename]", "link a type to current address.",
+	"tl", "[typename] = [address]", "link type to given address.",
+	"tls", "[address]", "show link at given address",
+	"tl-*", "", "delete all links.",
+	"tl-", "[address]", "delete link at given address.",
+	"tl*", "", "list all links in radare2 command format",
+	"tl?", "", "print this help.",
+	NULL
+};
+
+static const char *help_msg_tn[] = {
+	"Usage:", "tn [-][0xaddr|symname]", " manage no-return marks",
+	"tn[a]", " 0x3000", "stop function analysis if call/jmp to this address",
+	"tn[n]", " sym.imp.exit", "same as above but for flag/fcn names",
+	"tn", "-*", "remove all no-return references",
+	"tn", "", "list them all",
+	NULL
+};
+
+static const char *help_msg_ts[] = {
+	"USAGE ts[...]", " [type]", "",
+	"ts", "", "List all loaded structs",
+	"ts", " [type]", "Show pf format string for given struct",
+	"ts?", "", "show this help",
+	NULL
+};
+
+static const char *help_msg_tu[] = {
+	"USAGE tu[...]", "", "",
+	"tu", "", "List all loaded unions",
+	"tu?", "", "show this help",
+	NULL
+};
+
+static void cmd_type_init(RCore *core) {
+	DEFINE_CMD_DESCRIPTOR (core, t);
+	DEFINE_CMD_DESCRIPTOR_SPECIAL (core, t-, t_minus);
+	DEFINE_CMD_DESCRIPTOR (core, ta);
+	DEFINE_CMD_DESCRIPTOR (core, tc);
+	DEFINE_CMD_DESCRIPTOR (core, td);
+	DEFINE_CMD_DESCRIPTOR (core, te);
+	DEFINE_CMD_DESCRIPTOR (core, tl);
+	DEFINE_CMD_DESCRIPTOR (core, tn);
+	DEFINE_CMD_DESCRIPTOR (core, ts);
+	DEFINE_CMD_DESCRIPTOR (core, tu);
+}
+
 static void show_help(RCore *core) {
-	const char *help_message[] = {
-		"Usage: t", "", "# cparse types commands",
-		"t", "", "List all loaded types",
-		"t", " <type>", "Show type in 'pf' syntax",
-		"t*", "", "List types info in r2 commands",
-		"t-", " <name>", "Delete types by its name",
-		"t-*", "", "Remove all types",
-		//"t-!", "",          "Use to open $EDITOR",
-		"tb", " <enum> <value>", "Show matching enum bitfield for given number",
-		"te", "[?]", "List all loaded enums",
-		"te", " <enum> <value>", "Show name for given enum number",
-		"td", "[?] <string>", "Load types from string",
-		"tf", "", "List all loaded functions signatures",
-		"tk", " <sdb-query>", "Perform sdb query",
-		"tl", "[?]", "Show/Link type to an address",
-		//"to",  "",         "List opened files",
-		"tn", "[?] [-][addr]", "manage noreturn function attributes and marks",
-		"to", " -", "Open cfg.editor to load types",
-		"to", " <path>", "Load types from C header file",
-		"tos", " <path>", "Load types from parsed Sdb database",
-		"tp", " <type>  = <address>", "cast data at <address> to <type> and print it",
-		"ts", "[?]", "print loaded struct types",
-		"tu", "[?]", "print loaded union types",
-		//"| ts k=v k=v @ link.addr set fields at given linked type\n"
-		NULL };
-	r_core_cmd_help (core, help_message);
+	r_core_cmd_help (core, help_msg_t);
 }
 
 static void showFormat(RCore *core, const char *name) {
@@ -42,7 +138,7 @@ static void showFormat(RCore *core, const char *name) {
 	} else {
 		char *fmt = r_anal_type_format (core->anal, name);
 		if (fmt) {
-			r_str_chop (fmt);
+			r_str_trim (fmt);
 			r_cons_printf ("pf %s\n", fmt);
 			free (fmt);
 		} else {
@@ -52,13 +148,6 @@ static void showFormat(RCore *core, const char *name) {
 }
 
 static void cmd_type_noreturn(RCore *core, const char *input) {
-	const char *help_msg[] = {
-		"Usage:", "tn [-][0xaddr|symname]", " manage no-return marks",
-		"tn[a]", " 0x3000", "stop function analysis if call/jmp to this address",
-		"tn[n]", " sym.imp.exit", "same as above but for flag/fcn names",
-		"tn", "-*", "remove all no-return references",
-		"tn", "", "list them all",
-		NULL };
 	switch (input[0]) {
 	case '-': // "tn-"
 		r_anal_noreturn_drop (core->anal, input + 1);
@@ -72,19 +161,19 @@ static void cmd_type_noreturn(RCore *core, const char *input) {
 					r_num_math (core->num, input + 1));
 		}
 		break;
-	case 'a': // "ta"
+	case 'a': // "tna"
 		if (input[1] == ' ') {
 			r_anal_noreturn_add (core->anal, NULL,
 					r_num_math (core->num, input + 1));
 		} else {
-			r_core_cmd_help (core, help_msg);
+			r_core_cmd_help (core, help_msg_tn);
 		}
 		break;
 	case 'n': // "tnn"
 		if (input[1] == ' ') {
 			/* do nothing? */
 		} else {
-			r_core_cmd_help (core, help_msg);
+			r_core_cmd_help (core, help_msg_tn);
 		}
 		break;
 	case '*':
@@ -96,7 +185,7 @@ static void cmd_type_noreturn(RCore *core, const char *input) {
 		break;
 	default:
 	case '?':
-		r_core_cmd_help (core, help_msg);
+		r_core_cmd_help (core, help_msg_tn);
 		break;
 	}
 }
@@ -130,18 +219,21 @@ static void save_parsed_type(RCore *core, const char *parsed) {
 //look at the next couple of functions
 //can be optimized into one right ... you see it you do it :P
 static int stdprintifstruct (void *p, const char *k, const char *v) {
-	if (!strncmp (v, "struct", strlen ("struct") + 1))
+	if (!strncmp (v, "struct", strlen ("struct") + 1)) {
 		r_cons_println (k);
+	}
 	return 1;
 }
 static int stdprintiffunc (void *p, const char *k, const char *v) {
-	if (!strncmp (v, "func", strlen ("func") + 1))
+	if (!strncmp (v, "func", strlen ("func") + 1)) {
 		r_cons_println (k);
+	}
 	return 1;
 }
 static int stdprintifunion (void *p, const char *k, const char *v) {
-	if (!strncmp (v, "union", strlen ("union") + 1))
+	if (!strncmp (v, "union", strlen ("union") + 1)) {
 		r_cons_println (k);
+	}
 	return 1;
 }
 
@@ -154,8 +246,9 @@ static int sdbdeletelink (void *p, const char *k, const char *v) {
 }
 
 static int linklist (void *p, const char *k, const char *v) {
-	if (!strncmp (k, "link.", strlen ("link.")))
+	if (!strncmp (k, "link.", strlen ("link."))) {
 		r_cons_printf ("tl %s = 0x%s\n", v, k + strlen ("link."));
+	}
 	return 1;
 }
 static int linklist_readable (void *p, const char *k, const char *v) {
@@ -219,31 +312,55 @@ static int typelist(void *p, const char *k, const char *v) {
 	return 1;
 }
 
-static int sdbforcb (void *p, const char *k, const char *v) {
-	if (!strncmp (v, "type", strlen ("type") + 1)) {
-		r_cons_println (k);
-	}
+static int sdbforcb_default (void *p, const char *k, const char *v) {
+	r_cons_println (k);
+	return 1;
+}
+
+static int sdbforcb_json (void *p, const char *k, const char *v) {
+	Sdb *sdb = (Sdb *)p;
+	char *sizecmd = r_str_newf ("type.%s.size", k);
+	char *formatcmd = r_str_newf ("type.%s", k);
+	r_cons_printf ("{\"type\":\"%s\",\"size\":%d,\"format\":\"%s\"}", k,
+			atoi (sdb_querys (sdb, NULL, -1, sizecmd)),
+			r_str_trim (sdb_querys (sdb, NULL, -1, formatcmd)));
+	free (sizecmd);
+	free (formatcmd);
 	return 1;
 }
 
 static void typesList(RCore *core, int mode) {
 	switch (mode) {
-	case 'j':
-		eprintf ("TODO\n");
-		break;
 	case 1:
 	case '*':
 		sdb_foreach (core->anal->sdb_types, typelist, core);
 		break;
+	case 'j':
 	default:
 		{
 		SdbList *ls = sdb_foreach_list (core->anal->sdb_types, true);
+		SdbList *filtls = ls_new ();
 		SdbListIter *it;
 		SdbKv *kv;
 		ls_foreach (ls, it, kv) {
-			sdbforcb ((void *)core, kv->key, kv->value);
+			if (!strncmp (kv->value, "type", strlen ("type") + 1)) {
+				ls_append (filtls, kv);
+			}
+		}
+		if (mode == 'j') {
+			r_cons_print ("[");
+			ls_foreach (filtls, it, kv) {
+				sdbforcb_json ((void *)core->anal->sdb_types, kv->key, kv->value);
+				if (it->n) { r_cons_print (","); }
+			}
+			r_cons_println ("]");
+		} else {
+			ls_foreach (filtls, it, kv) {
+				sdbforcb_default ((void *)core->anal->sdb_types, kv->key, kv->value);
+			}
 		}
 		ls_free (ls);
+		ls_free (filtls);
 		}
 		break;
 	}
@@ -252,12 +369,6 @@ static void typesList(RCore *core, int mode) {
 static int cmd_type(void *data, const char *input) {
 	RCore *core = (RCore *)data;
 	char *res;
-	const char *help_message[] = {
-		"USAGE tu[...]", "", "",
-		"tu", "", "List all loaded unions",
-		"tu?", "", "show this help",
-		NULL
-	};
 
 	switch (input[0]) {
 	case 'n': // "tn"
@@ -267,7 +378,7 @@ static int cmd_type(void *data, const char *input) {
 	case 'u': // "tu"
 		switch (input[1]) {
 		case '?':
-			r_core_cmd_help (core, help_message);
+			r_core_cmd_help (core, help_msg_tu);
 			break;
 		case 0:
 			sdb_foreach (core->anal->sdb_types, stdprintifunion, core);
@@ -282,16 +393,54 @@ static int cmd_type(void *data, const char *input) {
 			r_cons_print (res);
 		}
 		break;
+	case 'c': // "tc"
+		switch (input[1]) {
+		case ' ':
+			r_core_cmdf (core, "k anal/cc/*~cc.%s.", input + 2);
+			break;
+		case '=':
+			if (input[2]) {
+				r_core_cmdf (core, "k anal/cc/default.cc=%s", input + 2);
+			} else {
+				r_core_cmd0 (core, "k anal/cc/default.cc");
+			}
+			break;
+		case 'r':
+			{ /* very slow, but im tired of waiting for having this, so this is the quickest implementation */
+				int i;
+				char *cc = r_str_trim (r_core_cmd_str (core, "k anal/cc/default.cc"));
+				for (i = 0; i < 8; i++) {
+					char *res = r_core_cmd_strf (core, "k anal/cc/cc.%s.arg%d", cc, i);
+					r_str_trim_nc (res);
+					if (*res) {
+						char *row = r_str_trim (r_core_cmd_strf (core, "drr~%s 0x", res));
+						r_cons_printf ("arg[%d] %s\n", i, row);
+						free (row);
+					}
+					free (res);
+				}
+				free (cc);
+			}
+			break;
+		case 'j':
+			// TODO: json output here
+			break;
+		case 'l':
+		case 'k':
+			r_core_cmd0 (core, "k anal/cc/*");
+			break;
+		case 0:
+			r_core_cmd0 (core, "k anal/cc/*~=cc[0]");
+			break;
+		default:
+			r_core_cmd_help (core, help_msg_tc);
+			break;
+		}
+		break;
 	case 's': // "ts"
 		switch (input[1]) {
 		case '?': {
-			const char *help_message[] = {
-				"USAGE ts[...]", " [type]", "",
-				"ts", "", "List all loaded structs",
-				"ts", " [type]", "Show pf format string for given struct",
-				"ts?", "", "show this help",
-				NULL };
-			r_core_cmd_help (core, help_message);
+			r_core_cmd_help (core, help_msg_ts);
 		} break;
 		case ' ':
 			showFormat (core, input + 2);
@@ -343,13 +492,7 @@ static int cmd_type(void *data, const char *input) {
 			break;
 		}
 		if (input[1] == '?') {
-			const char *help_message[] = {
-				"USAGE te[...]", "", "",
-				"te", "", "List all loaded enums",
-				"te", " <enum> <value>", "Show name for given enum number",
-				"te?", "", "show this help",
-				NULL };
-			r_core_cmd_help (core, help_message);
+			r_core_cmd_help (core, help_msg_te);
 			break;
 		}
 		char *p, *s = strdup (input + 2);
@@ -396,7 +539,7 @@ static int cmd_type(void *data, const char *input) {
 					char *out, *tmp;
 					tmp = r_core_editor (core, NULL, "");
 					if (tmp) {
-						out = r_parse_c_string (tmp);
+						out = r_parse_c_string (core->anal, tmp);
 						if (out) {
 							//		r_cons_strcat (out);
 							save_parsed_type (core, out);
@@ -405,7 +548,7 @@ static int cmd_type(void *data, const char *input) {
 						free (tmp);
 					}
 				} else {
-					char *out = r_parse_c_file (filename);
+					char *out = r_parse_c_file (core->anal, filename);
 					if (out) {
 						//r_cons_strcat (out);
 						save_parsed_type (core, out);
@@ -430,11 +573,8 @@ static int cmd_type(void *data, const char *input) {
 	// td - parse string with cparse engine and load types from it
 	case 'd': // "td"
 		if (input[1] == '?') {
-			const char *help_message[] = {
-				"Usage:", "\"td [...]\"", "",
-				"td", "[string]", "Load types from string",
-				NULL };
-			r_core_cmd_help (core, help_message);
+			// TODO #7967 help refactor: move to detail
+			r_core_cmd_help (core, help_msg_td);
 			r_cons_printf ("Note: The td command should be put between double quotes\n"
 				"Example: \" td struct foo {int bar;int cow};\""
 				"\nt");
@@ -444,7 +584,7 @@ static int cmd_type(void *data, const char *input) {
 			snprintf (tmp, sizeof (tmp) - 1, "%s;", input + 2);
 			//const char *string = input + 2;
 			//r_anal_str_to_type (core->anal, string);
-			char *out = r_parse_c_string (tmp);
+			char *out = r_parse_c_string (core->anal, tmp);
 			if (out) {
 				//r_cons_strcat (out);
 				save_parsed_type (core, out);
@@ -454,31 +594,33 @@ static int cmd_type(void *data, const char *input) {
 			eprintf ("Invalid use of td. See td? for help\n");
 		}
 		break;
-	// tl - link a type to an address
-	case 'l': // "tl"
+	// ta - link immediate type offset to an address
+	case 'a': // "ta"
 		switch (input[1]) {
-		case '?': {
-			const char *help_message[] = {
-				"Usage:", "", "",
-				"tl", "", "list all links in readable format",
-				"tl", "[typename]", "link a type to current address.",
-				"tl", "[typename] = [address]", "link type to given address.",
-				"tls", "[address]", "show link at given address",
-				"tl-*", "", "delete all links.",
-				"tl-", "[address]", "delete link at given address.",
-				"tl*", "", "list all links in radare2 command format",
-				"tl?", "", "print this help.",
-				NULL };
-			r_core_cmd_help (core, help_message);
-			} break;
+		case 's': {
+			char *off = strdup (input + 2);
+			r_str_trim (off);
+			int toff = r_num_math (NULL, off);
+			if (toff) {
+				RList *typeoffs = r_anal_type_get_by_offset (core->anal, toff);
+				RListIter *iter;
+				char *ty;
+				r_list_foreach (typeoffs, iter, ty) {
+					r_cons_printf ("%s\n", ty);
+				}
+			}
+			break;
+		}
 		case ' ': {
 			char *type = strdup (input + 2);
 			char *ptr = strchr (type, '=');
+			ut64 offimm = 0;
+			int i = 0;
 			ut64 addr;
 
 			if (ptr) {
 				*ptr++ = 0;
-				r_str_chop (ptr);
+				r_str_trim (ptr);
 				if (ptr && *ptr) {
 					addr = r_num_math (core->num, ptr);
 				} else {
@@ -489,7 +631,76 @@ static int cmd_type(void *data, const char *input) {
 			} else {
 				addr = core->offset;
 			}
-			r_str_chop (type);
+			r_str_trim (type);
+			RAsmOp asmop;
+			RAnalOp op;
+			ut8 code[128] = {0};
+			(void)r_io_read_at (core->io, core->offset, code, sizeof (code));
+			r_asm_set_pc (core->assembler, addr);
+			int ret = r_asm_disassemble (core->assembler, &asmop, code, core->blocksize);
+			ret = r_anal_op (core->anal, &op, core->offset, code, core->blocksize);
+			if (ret >= 0) {
+				// HACK: Just convert only the first imm seen
+				for (i = 0; i < 3; i++) {
+					if (op.src[i]) {
+						if (op.src[i]->imm) {
+							offimm = op.src[i]->imm;
+						} else if (op.src[i]->delta) {
+							offimm = op.src[i]->delta;
+						}
+					}
+				}
+				if (offimm != 0) {
+					// TODO: Allow to select from multiple choices
+					RList* otypes = r_anal_type_get_by_offset (core->anal, offimm);
+					RListIter *iter;
+					char *otype = NULL;
+					r_list_foreach (otypes, iter, otype) {
+						if (!strcmp(type, otype)) {
+							//eprintf ("Adding type offset %s\n", type);
+							r_anal_type_link_offset (core->anal, type, addr);
+							r_anal_hint_set_offset (core->anal, addr, otype);
+							break;
+						}
+					}
+					if (!otype) {
+						eprintf ("wrong type for opcode offset\n");
+					}
+				}
+			}
+			free (type);
+		}
+		break;
+		case '?':
+			r_core_cmd_help (core, help_msg_ta);
+			break;
+		}
+		break;
+	// tl - link a type to an address
+	case 'l': // "tl"
+		switch (input[1]) {
+		case '?':
+			r_core_cmd_help (core, help_msg_tl);
+			break;
+		case ' ': {
+			char *type = strdup (input + 2);
+			char *ptr = strchr (type, '=');
+			ut64 addr;
+
+			if (ptr) {
+				*ptr++ = 0;
+				r_str_trim (ptr);
+				if (ptr && *ptr) {
+					addr = r_num_math (core->num, ptr);
+				} else {
+					eprintf ("address is unvalid\n");
+					free (type);
+					break;
+				}
+			} else {
+				addr = core->offset;
+			}
+			r_str_trim (type);
 			char *tmp = sdb_get (core->anal->sdb_types, type, 0);
 			if (tmp && *tmp) {
 				r_anal_type_link (core->anal, type, addr);
@@ -506,7 +717,7 @@ static int cmd_type(void *data, const char *input) {
 			SdbKv *kv;
 			SdbListIter *sdb_iter;
 			SdbList *sdb_list = sdb_foreach_list (core->anal->sdb_types, true);
-			r_str_chop (addr);
+			r_str_trim (addr);
 			ptr = r_num_math (NULL, addr);
 			//r_core_cmdf (core, "tl~0x%08"PFMT64x" = ", addr);
 			ls_foreach (sdb_list, sdb_iter, kv) {
@@ -568,10 +779,7 @@ static int cmd_type(void *data, const char *input) {
 		break;
 	case '-':
 		if (input[1] == '?') {
-			const char *help_message[] = {
-				"Usage: t-", " <type>", "Delete type by its name",
-				NULL };
-			r_core_cmd_help (core, help_message);
+			r_core_cmd_help (core, help_msg_t_minus);
 		} else if (input[1] == '*') {
 			sdb_reset (core->anal->sdb_types);
 		} else {
@@ -594,6 +802,7 @@ static int cmd_type(void *data, const char *input) {
 							r_anal_type_del (core->anal, kv->key);
 						}
 					}
+					ls_free (l);
 					free (tmp);
 				}
 			} else eprintf ("Invalid use of t- . See t-? for help.\n");

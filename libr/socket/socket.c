@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2006-2015 - pancake */
+/* radare - LGPL - Copyright 2006-2017 - pancake */
 
 /* must be included first because of winsock2.h and windows.h */
 #include <r_socket.h>
@@ -13,9 +13,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
-#ifdef _MSC_VER
-#pragma comment(lib, "ws2_32.lib")
-#endif
 
 #if EMSCRIPTEN
 #define NETWORK_DISABLED 1
@@ -42,6 +39,9 @@ R_API int r_socket_unix_listen (RSocket *s, const char *file) {
 }
 R_API bool r_socket_connect (RSocket *s, const char *host, const char *port, int proto, unsigned int timeout) {
 	return false;
+}
+R_API int r_socket_spawn (RSocket *s, const char *cmd, unsigned int timeout) {
+	return -1;
 }
 R_API int r_socket_close_fd (RSocket *s) {
 	return -1;
@@ -211,6 +211,35 @@ R_API RSocket *r_socket_new (int is_ssl) {
 	return s;
 }
 
+R_API int r_socket_spawn (RSocket *s, const char *cmd, unsigned int timeout) {
+	// XXX TODO: dont use sockets, we can achieve the same with pipes
+	const int port = 2000 + r_num_rand (2000);
+	int childPid = r_sys_fork();
+	if (childPid == 0) {
+		char *a = r_str_replace (strdup (cmd), "\\", "\\\\", true);
+		r_sys_cmdf ("rarun2 system=\"%s\" listen=%d", a, port);
+		free (a);
+#if 0
+		// TODO: use the api
+		char *profile = r_str_newf (
+				"system=%s\n"
+				"listen=%d\n", cmd, port);
+		RRunProfile *rp = r_run_new (profile);
+		r_run_start (rp);
+		r_run_free (rp);
+		free (profile);
+#endif
+		eprintf ("r_socket_spawn: %s is dead\n", cmd);
+		exit (0);
+	}
+	r_sys_sleep (1);
+	r_sys_usleep (timeout);
+	char aport[32];
+	sprintf (aport, "%d", port);
+	// redirect stdin/stdout/stderr
+	return r_socket_connect (s, "127.0.0.1", aport, R_SOCKET_PROTO_TCP, 2000);
+}
+
 R_API bool r_socket_connect (RSocket *s, const char *host, const char *port, int proto, unsigned int timeout) {
 #if __WINDOWS__ && !defined(__CYGWIN__) //&& !defined(__MINGW64__)
 	struct sockaddr_in sa;
@@ -270,13 +299,14 @@ R_API bool r_socket_connect (RSocket *s, const char *host, const char *port, int
 	FD_SET (s->fd, &Write);
 	FD_SET (s->fd, &Err);
 	select (0, NULL, &Write, &Err, &Timeout);
-	if(FD_ISSET (s->fd, &Write)) {
+	if (FD_ISSET (s->fd, &Write)) {
 		return true;
 	}
 	return false;
 #elif __UNIX__ || defined(__CYGWIN__)
-	int gai, ret;
-	struct addrinfo hints, *res, *rp;
+	int ret;
+	struct addrinfo hints = {0};
+	struct addrinfo *res, *rp;
 	if (!proto) {
 		proto = R_SOCKET_PROTO_TCP;
 	}
@@ -286,10 +316,9 @@ R_API bool r_socket_connect (RSocket *s, const char *host, const char *port, int
 			return false;
 		}
 	} else {
-		memset (&hints, 0, sizeof (struct addrinfo));
 		hints.ai_family = AF_UNSPEC; /* Allow IPv4 or IPv6 */
 		hints.ai_protocol = proto;
-		gai = getaddrinfo (host, port, &hints, &res);
+		int gai = getaddrinfo (host, port, &hints, &res);
 		if (gai != 0) {
 			eprintf ("Error in getaddrinfo: %s\n", gai_strerror (gai));
 			return false;
@@ -620,8 +649,9 @@ R_API int r_socket_ready(RSocket *s, int secs, int usecs) {
 	FD_SET (s->fd, &rfds);
 	tv.tv_sec = secs;
 	tv.tv_usec = usecs;
-	if (select (s->fd+1, &rfds, NULL, NULL, &tv) == -1)
+	if (select (s->fd + 1, &rfds, NULL, NULL, &tv) == -1) {
 		return -1;
+	}
 	return FD_ISSET (0, &rfds);
 #endif
 #else
@@ -631,9 +661,7 @@ R_API int r_socket_ready(RSocket *s, int secs, int usecs) {
 
 R_API char *r_socket_to_string(RSocket *s) {
 #if __WINDOWS__ && !defined(__CYGWIN__) //&& !defined(__MINGW64__)
-	char *str = malloc (32);
-	snprintf (str, 31, "fd%d", s->fd);
-	return str;
+	return r_str_newf ("fd%d", (int)(size_t)s->fd);
 #elif __UNIX__ || defined(__CYGWIN__)
 	char *str = NULL;
 	struct sockaddr sa;
@@ -675,15 +703,16 @@ R_API int r_socket_write(RSocket *s, void *buf, int len) {
 			ret = send (s->fd, (char *)buf+delta, b, 0);
 		}
 		//if (ret == 0) return -1;
-		if (ret<1) break;
-		if (ret == len)
+		if (ret < 1) {
+			break;
+		}
+		if (ret == len) {
 			return len;
+		}
 		delta += ret;
 		len -= ret;
 	}
-	if (ret == -1)
-		return -1;
-	return delta;
+	return (ret == -1)? -1 : delta;
 }
 
 R_API int r_socket_puts(RSocket *s, char *buf) {

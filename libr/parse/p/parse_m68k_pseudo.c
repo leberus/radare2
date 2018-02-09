@@ -62,7 +62,7 @@ static int replace(int argc, const char *argv[], char *newstr) {
 		{ "lsl",  "2 <<= 1", 2},
 		{ "andi",  "2 &= 1", 2},
 		{ "nop",  ""},
-// 
+//
 		{ NULL }
 	};
 
@@ -123,7 +123,7 @@ static int parse(RParse *p, const char *data, char *str) {
 	r_str_replace_in (buf, len+1, ".w", "", 1);
 	r_str_replace_in (buf, len+1, ".d", "", 1);
 	r_str_replace_in (buf, len+1, ".b", "", 1);
-	r_str_chop (buf);
+	r_str_trim (buf);
 
 	if (*buf) {
 		w0[0]='\0';
@@ -187,14 +187,14 @@ static int parse(RParse *p, const char *data, char *str) {
 	return true;
 }
 
-struct r_parse_plugin_t r_parse_plugin_m68k_pseudo = {
+RParsePlugin r_parse_plugin_m68k_pseudo = {
 	.name = "m68k.pseudo",
 	.desc = "M68K pseudo syntax",
 	.parse = parse,
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_PARSE,
 	.data = &r_parse_plugin_m68k_pseudo,
 	.version = R2_VERSION

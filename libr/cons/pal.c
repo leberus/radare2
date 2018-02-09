@@ -25,6 +25,7 @@ R_API void r_cons_pal_init (const char *foo) {
 	cons->pal.cjmp = Color_GREEN;
 	cons->pal.cmp = Color_CYAN;
 	cons->pal.comment = Color_RED;
+	cons->pal.usercomment = Color_WHITE;
 	cons->pal.creg = Color_CYAN;
 	cons->pal.flag = Color_CYAN;
 	cons->pal.fline = Color_CYAN;
@@ -64,6 +65,7 @@ R_API void r_cons_pal_init (const char *foo) {
 	cons->pal.gui_background = Color_BLACK;
 	cons->pal.gui_alt_background = Color_WHITE;
 	cons->pal.gui_border = Color_BLACK;
+	cons->pal.highlight = Color_BGRED;
 
 	cons->pal.graph_box = Color_RESET;
 	cons->pal.graph_box2 = Color_BLUE;
@@ -157,7 +159,9 @@ R_API char *r_cons_pal_parse (const char *str) {
 	ut8 r, g, b;
 	char out[128];
 	char *s = strdup (str);
-	if (!s) return NULL;
+	if (!s) {
+		return NULL;
+	}
 	char *p = strchr (s + 1, ' ');
 	out[0] = 0;
 	if (p) *p++ = 0;
@@ -188,12 +192,12 @@ R_API char *r_cons_pal_parse (const char *str) {
 		}
 	}
 	if (p && !strncmp (p, "rgb:", 4)) {
-		if (strlen (s) == 7) {
+		if (strlen (p) == 7) {
 			r = rgbnum (p[4], '0');
 			g = rgbnum (p[5], '0');
 			b = rgbnum (p[6], '0');
 			r_cons_rgb_str (out + strlen (out), r, g, b, 1);
-		} else if (strlen (s) == 10) {
+		} else if (strlen (p) == 10) {
 			r = rgbnum (p[4], p[5]);
 			g = rgbnum (p[6], p[7]);
 			b = rgbnum (p[8], p[9]);
@@ -219,6 +223,7 @@ static struct {
 	int off;
 } keys[] = {
 	{ "comment", r_offsetof (RConsPalette, comment) },
+	{ "usrcmt", r_offsetof (RConsPalette, usercomment) },
 	{ "args", r_offsetof (RConsPalette, args) },
 	{ "fname", r_offsetof (RConsPalette, fname) },
 	{ "floc", r_offsetof (RConsPalette, floc) },
@@ -276,6 +281,7 @@ static struct {
 	{ "gui.background", r_offsetof (RConsPalette, gui_background) },
 	{ "gui.alt_background", r_offsetof (RConsPalette, gui_alt_background) },
 	{ "gui.border", r_offsetof (RConsPalette, gui_border) },
+	{ "highlight", r_offsetof (RConsPalette, highlight) },
 	{ NULL, 0 }
 };
 
@@ -409,7 +415,7 @@ R_API void r_cons_pal_list (int rad, const char *arg) {
 				keys[i].name, r, g, b, hasnext);
 			break;
 		case 'c': {
-			const char *prefix = r_str_chop_ro (arg);
+			const char *prefix = r_str_trim_ro (arg);
 			if (!prefix) {
 				prefix = "";
 			}
@@ -542,7 +548,7 @@ R_API void r_cons_rainbow_free() {
 	R_FREE (cons->pal.rainbow);
 }
 
-R_API const char *r_cons_rainbow_get(int idx, int last, bool bg) {
+R_API char *r_cons_rainbow_get(int idx, int last, bool bg) {
 	RCons *cons = r_cons_singleton ();
 	if (last < 0) {
 		last = cons->pal.rainbow_sz;
@@ -555,7 +561,7 @@ R_API const char *r_cons_rainbow_get(int idx, int last, bool bg) {
 	const char *a = cons->pal.rainbow[x];
 	if (bg) {
 		char *dup = r_str_newf ("%s %s", a, a);
-		const char *res = r_cons_pal_parse (dup);
+		char *res = r_cons_pal_parse (dup);
 		free (dup);
 		return res;
 	}

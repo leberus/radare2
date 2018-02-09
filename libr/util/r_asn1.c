@@ -13,17 +13,15 @@
 const char* _hex = "0123456789abcdef";
 
 RASN1String *r_asn1_create_string (const char *string, bool allocated, ut32 length) {
-	RASN1String *s;
 	if (!string || !length) {
 		return NULL;
 	}
-	s = (RASN1String*) malloc (sizeof (RASN1String));
-	if (!s) {
-		return NULL;
+	RASN1String *s = R_NEW0 (RASN1String);
+	if (s) {
+		s->allocated = allocated;
+		s->length = length;
+		s->string = string;
 	}
-	s->allocated = allocated;
-	s->length = length;
-	s->string = string;
 	return s;
 }
 
@@ -71,15 +69,14 @@ RASN1String *r_asn1_stringify_string (const ut8 *buffer, ut32 length) {
 }
 
 RASN1String *r_asn1_stringify_utctime (const ut8 *buffer, ut32 length) {
-	char* str;
 	if (!buffer || length != 13 || buffer[12] != 'Z') {
 		return NULL;
 	}
-	str = (char*) malloc (24);
-	if (!buffer || !length) {
+	const int str_sz = 24;
+	char *str = malloc (str_sz);
+	if (!str) {
 		return NULL;
 	}
-
 	str[0] = buffer[4];
 	str[1] = buffer[5];
 	str[2] = '/';
@@ -105,17 +102,16 @@ RASN1String *r_asn1_stringify_utctime (const ut8 *buffer, ut32 length) {
 	str[22] = 'T';
 	str[23] = '\0';
 
-	return r_asn1_create_string (str, true, 24);
+	return r_asn1_create_string (str, true, str_sz);
 }
 
 RASN1String *r_asn1_stringify_time (const ut8 *buffer, ut32 length) {
-
-	char* str;
 	if (!buffer || length != 15 || buffer[14] != 'Z') {
 		return NULL;
 	}
-	str = (char*) malloc (24);
-	if (!buffer || !length) {
+	const int str_sz = 24;
+	char *str = malloc (str_sz);
+	if (!str) {
 		return NULL;
 	}
 
@@ -144,7 +140,7 @@ RASN1String *r_asn1_stringify_time (const ut8 *buffer, ut32 length) {
 	str[22] = 'T';
 	str[23] = '\0';
 
-	return r_asn1_create_string (str, true, 24);
+	return r_asn1_create_string (str, true, str_sz);
 }
 
 RASN1String *r_asn1_stringify_bits (const ut8 *buffer, ut32 length) {
@@ -268,11 +264,6 @@ RASN1String *r_asn1_stringify_oid (const ut8* buffer, ut32 length) {
 				slen = strlen (str);
 				t = str + slen;
 			} else {
-				//overflow
-				if ((ASN1_OID_LEN - slen) > ASN1_OID_LEN) {
-					free (str);
-					return NULL;
-				}
 				snprintf (t, ASN1_OID_LEN - slen, ".%01u", (ut32) oid);
 				slen = strlen (str);
 				t = str + slen;

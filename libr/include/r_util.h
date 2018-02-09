@@ -8,6 +8,7 @@
 #include <btree.h>
 #include <r_regex.h>
 #include <r_list.h> // radare linked list
+#include <r_skiplist.h> // skiplist
 #include <r_flist.h> // radare fixed pointer array iterators
 #include <r_th.h>
 #if !__WINDOWS__
@@ -25,6 +26,8 @@
 int gettimeofday (struct timeval* p, void* tz);
 #endif
 #include <sys/time.h>
+#include "r_util/r_itv.h"
+#include "r_util/r_rbtree.h"
 #include "r_util/r_big.h"
 #include "r_util/r_base64.h"
 #include "r_util/r_base91.h"
@@ -57,6 +60,8 @@ int gettimeofday (struct timeval* p, void* tz);
 #include "r_util/r_tree.h"
 #include "r_util/r_uleb128.h"
 #include "r_util/r_utf8.h"
+#include "r_util/r_utf16.h"
+#include "r_util/r_utf32.h"
 #include "r_util/r_id_storage.h"
 #include "r_util/r_asn1.h"
 #include "r_util/r_json.h"

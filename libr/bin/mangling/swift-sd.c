@@ -146,7 +146,7 @@ static char *swift_demangle_cmd(const char *s) {
 			free (res);
 			res = NULL;
 		}
-		return r_str_chop (res);
+		return r_str_trim (res);
 	}
 	return NULL;
 }
@@ -360,7 +360,10 @@ R_API char *r_bin_demangle_swift(const char *s, int syscmd) {
 					{
 						int n;
 						const char *Q = getnum (q + 1, &n);
-						strcat (out, getstring (Q, n));
+						const char *res = getstring (Q, n);
+						if (res) {
+							strcat (out, res);
+						}
 						q = Q + n + 1;
 						continue;
 					}
@@ -508,7 +511,7 @@ R_API char *r_bin_demangle_swift(const char *s, int syscmd) {
 					q += len;
 					p = q;
 				} else {
-					if (q) {
+					if (q && *q) {
 						q++;
 					} else {
 						break;

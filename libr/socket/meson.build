@@ -6,11 +6,12 @@ files=[
 'rap_server.c',
 'run.c',
 'socket.c',
+'serial.c',
 ]
 
-r_socket = shared_library('r_socket', files,
+r_socket = library('r_socket', files,
   include_directories: [platform_inc],
-  dependencies: [utl],
+  dependencies: [utl, platform_deps],
   link_with: [r_util],
   c_args : '-DCORELIB=1',
   install: true

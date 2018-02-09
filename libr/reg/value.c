@@ -3,6 +3,15 @@
 #include <r_reg.h>
 #include <r_util.h>
 
+typedef ut32 ut27;
+static ut27 r_read_me27(const ut8* buf, int boff) {
+        ut27 ret = 0;
+        r_mem_copybits_delta ((ut8*)&ret, 18, buf, boff, 9);
+        r_mem_copybits_delta ((ut8*)&ret, 9, buf, boff + 9, 9);
+        r_mem_copybits_delta ((ut8*)&ret, 0, buf, boff + 18, 9);
+        return ret;
+}
+
 R_API ut64 r_reg_get_value_big(RReg *reg, RRegItem *item, utX *val) {
 	RRegSet *regset;
 	int off;
@@ -48,6 +57,7 @@ R_API ut64 r_reg_get_value_big(RReg *reg, RRegItem *item, utX *val) {
 	}
 	return ret;
 }
+
 R_API ut64 r_reg_get_value(RReg *reg, RRegItem *item) {
 	RRegSet *regset;
 	int off;
@@ -83,6 +93,11 @@ R_API ut64 r_reg_get_value(RReg *reg, RRegItem *item) {
 			ret = r_read_ble16 (regset->arena->bytes + off, reg->big_endian);
 		}
 		break;
+	case 27:
+		if (off + 3 < regset->arena->size) {
+			ret = r_read_me27 (regset->arena->bytes + off, 0);
+		}
+		break;
 	case 32:
 		if (off + 4 <= regset->arena->size) {
 			ret = r_read_ble32 (regset->arena->bytes + off, reg->big_endian);
@@ -107,6 +122,11 @@ R_API ut64 r_reg_get_value(RReg *reg, RRegItem *item) {
 		break;
 	}
 	return ret;
+}
+
+R_API ut64 r_reg_get_value_by_role(RReg *reg, RRegisterId role) {
+	// TODO use mapping from RRegisterId to RRegItem (via RRegSet)
+	return r_reg_get_value (reg, r_reg_get (reg, r_reg_get_name (reg, role), -1));
 }
 
 R_API bool r_reg_set_value(RReg *reg, RRegItem *item, ut64 value) {
@@ -179,6 +199,12 @@ R_API bool r_reg_set_value(RReg *reg, RRegItem *item, ut64 value) {
 	}
 	eprintf ("r_reg_set_value: Cannot set %s to 0x%" PFMT64x "\n", item->name, value);
 	return false;
+}
+
+R_API bool r_reg_set_value_by_role(RReg *reg, RRegisterId role, ut64 val) {
+	// TODO use mapping from RRegisterId to RRegItem (via RRegSet)
+	RRegItem *r = r_reg_get (reg, r_reg_get_name (reg, role), -1);
+	return r_reg_set_value (reg, r, val);
 }
 
 R_API ut64 r_reg_set_bvalue(RReg *reg, RRegItem *item, const char *str) {

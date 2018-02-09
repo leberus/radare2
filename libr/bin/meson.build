@@ -28,6 +28,7 @@ files=[
 'p/bin_mach064.c',
 'p/bin_mbn.c',
 'p/bin_menuet.c',
+'p/bin_mdmp.c',
 'p/bin_mz.c',
 'p/bin_nes.c',
 'p/bin_nin3ds.c',
@@ -58,6 +59,7 @@ files=[
 'p/bin_xtr_dyldcache.c',
 'p/bin_xtr_fatmach0.c',
 'p/bin_zimg.c',
+'p/bin_z64.c',
 
 'format/bflt/bflt.c',
 'format/coff/coff.c',
@@ -70,6 +72,9 @@ files=[
 'format/mach0/fatmach0.c',
 'format/mach0/mach0.c',
 'format/mach0/mach064.c',
+'format/mdmp/mdmp.c',
+'format/mdmp/mdmp_pe.c',
+'format/mdmp/mdmp_pe64.c',
 'format/mz/mz.c',
 'format/objc/mach064_classes.c',
 'format/objc/mach0_classes.c',
@@ -104,15 +109,15 @@ files=[
 'pdb/tpi.c'
 ]
 
-r_bin = shared_library('r_bin', files,
+r_bin = library('r_bin', files,
   include_directories: [platform_inc, include_directories([
-    'mangling',
-    'format'
+	'mangling',
+	'format'
   ])],
   c_args : ['-DCORELIB=1', '-I' + meson.current_build_dir() + '/../..'],
   link_with: [r_util, r_io, r_socket, r_magic, libr2java],
   objects: [
-    libr2sdb.extract_all_objects()
+	libr2sdb.extract_all_objects()
   ],
   install: true
 )

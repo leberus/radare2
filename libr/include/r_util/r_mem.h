@@ -1,6 +1,10 @@
 #ifndef R_MEM_H
 #define R_MEM_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct r_mmap_t {
 	ut8 *buf;
 	ut64 base;
@@ -38,6 +42,8 @@ R_API int r_mem_protect(void *ptr, int size, const char *prot);
 R_API int r_mem_set_num(ut8 *dest, int dest_size, ut64 num);
 R_API int r_mem_eq(ut8 *a, ut8 *b, int len);
 R_API void r_mem_copybits(ut8 *dst, const ut8 *src, int bits);
+R_API void r_mem_copybits(ut8 *dst, const ut8 *src, int bits);
+R_API void r_mem_copybits_delta(ut8 *dst, int doff, const ut8 *src, int soff, int bits);
 R_API void r_mem_copyloop(ut8 *dest, const ut8 *orig, int dsize, int osize);
 R_API void r_mem_swaporcopy(ut8 *dest, const ut8 *src, int len, bool big_endian);
 R_API void r_mem_swapendian(ut8 *dest, const ut8 *orig, int size);
@@ -47,4 +53,8 @@ R_API const ut8 *r_mem_mem_aligned(const ut8 *haystack, int hlen, const ut8 *nee
 R_API int r_mem_count(const ut8 **addr);
 R_API bool r_mem_is_printable (const ut8 *a, int la);
 R_API bool r_mem_is_zero(const ut8 *b, int l);
+
+#ifdef __cplusplus
+}
+#endif
 #endif //  R_MEM_H

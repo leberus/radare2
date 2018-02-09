@@ -17,7 +17,7 @@ typedef struct {
 
 static libbochs_t *desc = NULL;
 
-static int r_debug_bochs_breakpoint (RBreakpointItem *bp, int set, void *user) {
+static int r_debug_bochs_breakpoint (RBreakpoint *bp, RBreakpointItem *b, bool set) {
 	char cmd[64];
 	char num[4];
 	char addr[19];
@@ -25,12 +25,12 @@ static int r_debug_bochs_breakpoint (RBreakpointItem *bp, int set, void *user) {
 	ut64 a;
 	int  n,i,lenRec;
 	//eprintf ("bochs_breakpoint\n");
-	if (!bp) {
+	if (!b) {
 		return false;
 	}
 	if (set) {
 		//eprintf("[set] bochs_breakpoint %016"PFMT64x"\n",bp->addr);
-		sprintf (cmd, "lb 0x%x", (ut32)bp->addr);
+		sprintf (cmd, "lb 0x%x", (ut32)b->addr);
 		bochs_send_cmd (desc, cmd, true);
 		bCapturaRegs = true;
 	} else {
@@ -56,14 +56,14 @@ static int r_debug_bochs_breakpoint (RBreakpointItem *bp, int set, void *user) {
 					n = r_num_get (NULL,num);
 					a = r_num_get (NULL,addr);
 					//eprintf("parseado %x %016"PFMT64x"\n",n,a);
-					if (a == bp->addr) {
+					if (a == b->addr) {
 						break;
 					}
 				}
 				i += 48;
 			} while (desc->data[i] != '<' && i<lenRec-4);
 		}
-		if (a == bp->addr) {
+		if (a == b->addr) {
 			snprintf (bufcmd, sizeof (bufcmd), "d %i", n);
 			//eprintf("[unset] Break point localizado indice = %x (%x) %s \n",n,(DWORD)a,bufcmd);
 			bochs_send_cmd (desc, bufcmd, true);
@@ -528,14 +528,14 @@ RDebugPlugin r_debug_plugin_bochs = {
 	.stop = &r_debug_bochs_stop,
 	.wait = &r_debug_bochs_wait,
 	.map_get = r_debug_bochs_map_get,
-	.breakpoint = &r_debug_bochs_breakpoint,
+	.breakpoint = (RBreakpointCallback)&r_debug_bochs_breakpoint,
 	.reg_read = &r_debug_bochs_reg_read,
 	.reg_write = &r_debug_bochs_reg_write,
 	.reg_profile = (void *)r_debug_bochs_reg_profile,
 };
 
 #ifndef CORELIB
-struct r_lib_struct_t radare_plugin = {
+RLibStruct radare_plugin = {
 	.type = R_LIB_TYPE_DBG,
 	.data = &r_debug_plugin_bochs,
 	.version = R2_VERSION

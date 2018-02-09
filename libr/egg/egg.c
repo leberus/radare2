@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2011-2017 - pancake */
+/* radare - LGPL - Copyright 2011-2018 - pancake */
 
 #include <r_egg.h>
 #include <config.h>
@@ -17,7 +17,9 @@ static REggPlugin *egg_static_plugins[] =
 R_API REgg *r_egg_new () {
 	int i;
 	REgg *egg = R_NEW0 (REgg);
-	if (!egg) return NULL;
+	if (!egg) {
+		return NULL;
+	}
 	egg->src = r_buf_new ();
 	if (!egg->src) goto beach;
 	egg->buf = r_buf_new ();
@@ -55,9 +57,11 @@ R_API int r_egg_add (REgg *a, REggPlugin *foo) {
 		return false;
 	//if (foo->init)
 	//	foo->init (a->user);
-	r_list_foreach (a->plugins, iter, h)
-		if (!strcmp (h->name, foo->name))
+	r_list_foreach (a->plugins, iter, h) {
+		if (!strcmp (h->name, foo->name)) {
 			return false;
+		}
+	}
 	r_list_append (a->plugins, foo);
 	return true;
 }
@@ -77,6 +81,7 @@ R_API void r_egg_free (REgg *egg) {
 	sdb_free (egg->db);
 	r_list_free (egg->plugins);
 	r_list_free (egg->patches);
+	r_egg_lang_free (egg);
 	free (egg);
 }
 
@@ -93,6 +98,7 @@ R_API void r_egg_reset (REgg *egg) {
 }
 
 R_API int r_egg_setup(REgg *egg, const char *arch, int bits, int endian, const char *os) {
+	const char *asmcpu = NULL; // TODO
 	egg->remit = NULL;
 
 	egg->os = os? r_str_hash (os): R_EGG_OS_DEFAULT;
@@ -102,12 +108,12 @@ R_API int r_egg_setup(REgg *egg, const char *arch, int bits, int endian, const c
 		egg->arch = R_SYS_ARCH_X86;
 		switch (bits) {
 		case 32:
-			r_syscall_setup (egg->syscall, arch, os, bits);
+			r_syscall_setup (egg->syscall, arch, bits, asmcpu, os);
 			egg->remit = &emit_x86;
 			egg->bits = bits;
 			break;
 		case 64:
-			r_syscall_setup (egg->syscall, arch, os, bits);
+			r_syscall_setup (egg->syscall, arch, bits, asmcpu, os);
 			egg->remit = &emit_x64;
 			egg->bits = bits;
 			break;
@@ -118,7 +124,7 @@ R_API int r_egg_setup(REgg *egg, const char *arch, int bits, int endian, const c
 		switch (bits) {
 		case 16:
 		case 32:
-			r_syscall_setup (egg->syscall, arch, os, bits);
+			r_syscall_setup (egg->syscall, arch, bits, asmcpu, os);
 			egg->remit = &emit_arm;
 			egg->bits = bits;
 			egg->endian = endian;
@@ -250,41 +256,53 @@ R_API void r_egg_printf(REgg *egg, const char *fmt, ...) {
 	va_end (ap);
 }
 
-R_API int r_egg_assemble(REgg *egg) {
+R_API int r_egg_assemble_asm(REgg *egg, char **asm_list) {
 	RAsmCode *asmcode = NULL;
 	char *code = NULL;
 	int ret = false;
-	if (egg->remit == &emit_x86 || egg->remit == &emit_x64) {
-		r_asm_use (egg->rasm, "x86.nz");
+	char *asm_name = NULL;
+
+	if (asm_list) {
+		char **asm_;
+
+		for (asm_ = asm_list; *asm_; asm_+= 2) {
+			if (!strcmp (egg->remit->arch, asm_[0])) {
+				asm_name = asm_[1];
+				break;
+			}
+		}
+	}
+	if (!asm_name) {
+		if (egg->remit == &emit_x86 || egg->remit == &emit_x64) {
+			asm_name = "x86.nz";
+		} else if (egg->remit == &emit_arm) {
+			asm_name = "arm";
+		}
+	}
+	if (asm_name) {
+		r_asm_use (egg->rasm, asm_name);
 		r_asm_set_bits (egg->rasm, egg->bits);
 		r_asm_set_big_endian (egg->rasm, egg->endian);
 		r_asm_set_syntax (egg->rasm, R_ASM_SYNTAX_INTEL);
-
 		code = r_buf_to_string (egg->buf);
 		asmcode = r_asm_massemble (egg->rasm, code);
 		if (asmcode) {
-			if (asmcode->len > 0)
+			if (asmcode->len > 0) {
 				r_buf_append_bytes (egg->bin, asmcode->buf, asmcode->len);
+			}
 			// LEAK r_asm_code_free (asmcode);
-		} else eprintf ("fail assembling\n");
-	} else
-	if (egg->remit == &emit_arm) {
-		r_asm_use (egg->rasm, "arm");
-		r_asm_set_bits (egg->rasm, egg->bits);
-		r_asm_set_big_endian (egg->rasm, egg->endian);
-		r_asm_set_syntax (egg->rasm, R_ASM_SYNTAX_INTEL);
-
-		code = r_buf_to_string (egg->buf);
-		asmcode = r_asm_massemble (egg->rasm, code);
-		if (asmcode) {
-			r_buf_append_bytes (egg->bin, asmcode->buf, asmcode->len);
-			// LEAK r_asm_code_free (asmcode);
+		} else {
+			eprintf ("fail assembling\n");
 		}
 	}
 	free (code);
 	ret = (asmcode != NULL);
 	r_asm_code_free (asmcode);
 	return ret;
+}
+
+R_API int r_egg_assemble(REgg *egg) {
+	return r_egg_assemble_asm (egg, NULL);
 }
 
 R_API int r_egg_compile(REgg *egg) {
@@ -300,6 +318,7 @@ R_API int r_egg_compile(REgg *egg) {
 			egg->remit->init (egg);
 	}
 #endif
+	r_egg_lang_init (egg);
 	if (b && *b) {
 		for (; b[0]; b++) {
 			r_egg_lang_parsechar (egg, *b);
@@ -422,7 +441,7 @@ R_API int r_egg_shellcode(REgg *egg, const char *name) {
 		if (p->type == R_EGG_PLUGIN_SHELLCODE && !strcmp (name, p->name)) {
 			b = p->build (egg);
 			if (!b) {
-				eprintf ("%s Encoder has failed\n", p->name);
+				eprintf ("%s Shellcode has failed\n", p->name);
 				return false;
 			}
 			r_egg_raw (egg, b->buf, b->length);
@@ -440,6 +459,7 @@ R_API int r_egg_encode(REgg *egg, const char *name) {
 	r_list_foreach (egg->plugins, iter, p) {
 		if (p->type == R_EGG_PLUGIN_ENCODER && !strcmp (name, p->name)) {
 			b = p->build (egg);
+			if (!b) return false;
 			r_buf_free (egg->bin);
 			egg->bin = b;
 			return true;

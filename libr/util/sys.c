@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2017 - pancake */
+/* radare - LGPL - Copyright 2009-2018 - pancake */
 
 #include <r_userconf.h>
 #include <stdlib.h>
@@ -13,12 +13,21 @@
 #include <r_types.h>
 #include <r_util.h>
 #include <r_lib.h>
+
+static char** env = NULL;
+
 #if (__linux__ && __GNU_LIBRARY__) || defined(NETBSD_WITH_BACKTRACE)
 # include <execinfo.h>
 #endif
 #if __APPLE__
 #include <errno.h>
-#if !__POWERPC__
+#ifdef __MAC_10_8
+#define HAVE_ENVIRON 1
+#else
+#define HAVE_ENVIRON 0
+#endif
+
+#if HAVE_ENVIRON
 #include <execinfo.h>
 #endif
 // iOS dont have this we cant hardcode
@@ -45,20 +54,25 @@ extern char **environ;
 #if __WINDOWS__ && !defined(__CYGWIN__)
 # include <io.h>
 # include <winbase.h>
+#define TMP_BUFSIZE	4096
 #ifdef _MSC_VER
 #include <psapi.h>
 #include <io.h>
 #include <process.h>  // to allow getpid under windows msvc compilation
 #include <direct.h>  // to allow getcwd under windows msvc compilation
 #else
-typedef BOOL WINAPI (*QueryFullProcessImageNameA_t) (HANDLE, DWORD, LPTSTR, PDWORD);
-typedef DWORD WINAPI (*GetProcessImageFileNameA_t) (HANDLE, LPTSTR, DWORD);
-static GetProcessImageFileNameA_t GetProcessImageFileNameA;
-static QueryFullProcessImageNameA_t QueryFullProcessImageNameA;
+typedef BOOL WINAPI (*QueryFullProcessImageName_t) (HANDLE, DWORD, LPTSTR, PDWORD);
+typedef DWORD WINAPI (*GetProcessImageFileName_t) (HANDLE, LPTSTR, DWORD);
+GetProcessImageFileName_t GetProcessImageFileName;
+QueryFullProcessImageName_t QueryFullProcessImageName;
 #endif
 #endif
 
 R_LIB_VERSION(r_util);
+#ifdef _MSC_VER
+// Required for GetModuleFileNameEx linking
+#pragma comment(lib, "psapi.lib")
+#endif
 
 static const struct {const char* name; ut64 bit;} arch_bit_array[] = {
     {"x86", R_SYS_ARCH_X86},
@@ -112,7 +126,7 @@ R_API ut64 r_sys_now(void) {
 R_API int r_sys_truncate(const char *file, int sz) {
 #if __WINDOWS__ && !__CYGWIN__
 	int fd = r_sandbox_open (file, O_RDWR, 0644);
-	if (fd != -1) {
+	if (fd == -1) {
 		return false;
 	}
 #ifdef _MSC_VER
@@ -243,9 +257,19 @@ R_API int r_sys_usleep(int usecs) {
 }
 
 R_API int r_sys_clearenv(void) {
-#if __UNIX__ || __CYGWIN__ && !defined(MINGW32)
-#if __APPLE__ && __POWERPC__
+#if __UNIX__ || (__CYGWIN__ && !defined(MINGW32))
+#if __APPLE__ && !HAVE_ENVIRON
 	/* do nothing */
+	if (!env) {
+		env = r_sys_get_environ ();
+		return 0;
+	}
+	if (env) {
+		char **e = env;
+		while (*e) {
+			*e++ = NULL;
+		}
+	}
 #else
 	if (!environ) {
 		return 0;
@@ -276,7 +300,12 @@ R_API int r_sys_setenv(const char *key, const char *value) {
 	}
 	return setenv (key, value, 1);
 #elif __WINDOWS__
-	SetEnvironmentVariableA (key, (LPSTR)value);
+	LPTSTR key_ = r_sys_conv_utf8_to_utf16 (key);
+	LPTSTR value_ = r_sys_conv_utf8_to_utf16 (value);
+
+	SetEnvironmentVariable (key_, value_);
+	free (key_);
+	free (value_);
 	return 0; // TODO. get ret
 #else
 #warning r_sys_setenv : unimplemented for this platform
@@ -284,9 +313,9 @@ R_API int r_sys_setenv(const char *key, const char *value) {
 #endif
 }
 
+#if __UNIX__
 static char *crash_handler_cmd = NULL;
 
-#if __UNIX__
 static void signal_handler(int signum) {
 	char cmd[1024];
 	if (!crash_handler_cmd) {
@@ -314,11 +343,11 @@ static int checkcmd(const char *c) {
 R_API int r_sys_crash_handler(const char *cmd) {
 #if __UNIX__
 	struct sigaction sigact;
-	void *array[1];
 	if (!checkcmd (cmd)) {
 		return false;
 	}
 #ifdef HAVE_BACKTRACE
+	void *array[1];
 	/* call this outside of the signal handler to init it safely */
 	backtrace (array, 1);
 #endif
@@ -352,14 +381,38 @@ R_API int r_sys_crash_handler(const char *cmd) {
 
 R_API char *r_sys_getenv(const char *key) {
 #if __WINDOWS__ && !__CYGWIN__
-	static char envbuf[1024];
+	DWORD dwRet;
+	LPTSTR envbuf = NULL, key_ = NULL;
+	char *val = NULL;
+
 	if (!key) {
 		return NULL;
 	}
-	envbuf[0] = 0;
-	GetEnvironmentVariableA (key, (LPSTR)&envbuf, sizeof (envbuf));
-	// TODO: handle return value of GEV
-	return *envbuf? strdup (envbuf): NULL;
+	envbuf = (LPTSTR)malloc (sizeof (TCHAR) * TMP_BUFSIZE);
+	if (!envbuf) {
+		goto err_r_sys_get_env;
+	}
+	key_ = r_sys_conv_utf8_to_utf16 (key);
+	dwRet = GetEnvironmentVariable (key_, envbuf, TMP_BUFSIZE);
+	if (dwRet == 0) {
+		if (GetLastError () == ERROR_ENVVAR_NOT_FOUND) {
+			goto err_r_sys_get_env;
+		}
+	} else if (TMP_BUFSIZE < dwRet) {
+		envbuf = (LPTSTR)realloc (envbuf, dwRet * sizeof (TCHAR));
+		if (!envbuf) {
+			goto err_r_sys_get_env;
+		}
+		dwRet = GetEnvironmentVariable (key_, envbuf, dwRet);
+		if (!dwRet) {
+			goto err_r_sys_get_env;
+		}
+	}
+	val = r_sys_conv_utf16_to_utf8_l (envbuf, (int)dwRet);
+err_r_sys_get_env:
+	free (key_);
+	free (envbuf);
+	return val;
 #else
 	char *b;
 	if (!key) {
@@ -371,17 +424,11 @@ R_API char *r_sys_getenv(const char *key) {
 }
 
 R_API char *r_sys_getdir(void) {
-	char *ret;
 #if __WINDOWS__ && !__CYGWIN__
-	char *cwd = _getcwd (NULL, 0);
+	return _getcwd (NULL, 0);
 #else
-	char *cwd = getcwd (NULL, 0);
+	return getcwd (NULL, 0);
 #endif
-	ret = cwd ? strdup (cwd) : NULL; 
-	if (cwd) {
-		free (cwd);
-	}
-	return ret;
 }
 
 R_API int r_sys_chdir(const char *s) {
@@ -589,7 +636,7 @@ R_API int r_sys_cmdbg (const char *str) {
 #endif
 }
 
-R_API int r_sys_cmd (const char *str) {
+R_API int r_sys_cmd(const char *str) {
 	if (r_sandbox_enable (0)) {
 		return false;
 	}
@@ -628,14 +675,20 @@ R_API char *r_sys_cmd_str(const char *cmd, const char *input, int *len) {
 }
 
 R_API bool r_sys_mkdir(const char *dir) {
+	bool ret;
+
 	if (r_sandbox_enable (0)) {
 		return false;
 	}
 #if __WINDOWS__ && !defined(__CYGWIN__)
-	return CreateDirectoryA (dir, NULL) != 0;
+	LPTSTR dir_ = r_sys_conv_utf8_to_utf16 (dir);
+
+	ret = CreateDirectory (dir_, NULL) != 0;
+	free (dir_);
 #else
-	return mkdir (dir, 0755) != -1;
+	ret = mkdir (dir, 0755) != -1;
 #endif
+	return ret;
 }
 
 R_API bool r_sys_mkdirp(const char *dir) {
@@ -691,26 +744,22 @@ R_API void r_sys_perror_str(const char *fun) {
 	perror (fun);
 #pragma pop_macro("perror")
 #elif __WINDOWS__
-	char *lpMsgBuf;
-	LPVOID lpDisplayBuf;
-	DWORD dw = GetLastError ();
+	LPTSTR lpMsgBuf;
+	DWORD dw = GetLastError();
 
-	FormatMessage ( FORMAT_MESSAGE_ALLOCATE_BUFFER |
+	if (FormatMessage ( FORMAT_MESSAGE_ALLOCATE_BUFFER |
 			FORMAT_MESSAGE_FROM_SYSTEM |
 			FORMAT_MESSAGE_IGNORE_INSERTS,
 			NULL,
 			dw,
 			MAKELANGID (LANG_NEUTRAL, SUBLANG_DEFAULT),
-			(LPTSTR) &lpMsgBuf,
-			0, NULL );
-
-	lpDisplayBuf = (LPVOID)LocalAlloc (LMEM_ZEROINIT,
-			(lstrlen ((LPCTSTR)lpMsgBuf)+
-			lstrlen ((LPCTSTR)fun) + 40) * sizeof (TCHAR));
-	eprintf ("%s: %s\n", fun, lpMsgBuf);
-
-	LocalFree (lpMsgBuf);
-	LocalFree (lpDisplayBuf);
+			(LPTSTR)&lpMsgBuf,
+			0, NULL )) {
+		eprintf ("%s: " W32_TCHAR_FSTR "\n", fun, lpMsgBuf);
+		LocalFree (lpMsgBuf);
+	} else {
+		eprintf ("%s\n", fun);
+	}
 #endif
 }
 
@@ -821,53 +870,69 @@ R_API int r_is_heap (void *p) {
 
 R_API char *r_sys_pid_to_path(int pid) {
 #if __WINDOWS__
-	HANDLE kernel32 = LoadLibraryA ("Kernel32.dll");
+	HANDLE kernel32 = GetModuleHandle (TEXT("kernel32"));
 	if (!kernel32) {
-		eprintf ("Error getting the handle to Kernel32.dll\n");
+		eprintf ("Error getting the handle to kernel32.dll\n");
 		return NULL;
 	}
 #ifndef _MSC_VER
-	if (!GetProcessImageFileNameA) {
-		if (!QueryFullProcessImageNameA) {
-			QueryFullProcessImageNameA = (QueryFullProcessImageNameA_t) GetProcAddress (kernel32, "QueryFullProcessImageNameA");
+	if (!GetProcessImageFileName) {
+		if (!QueryFullProcessImageName) {
+			QueryFullProcessImageName = (QueryFullProcessImageName_t) GetProcAddress (kernel32, W32_TCALL ("QueryFullProcessImageName"));
 		}
-		if (!QueryFullProcessImageNameA) {
+		if (!QueryFullProcessImageName) {
 			// QueryFullProcessImageName does not exist before Vista, fallback to GetProcessImageFileName
-			HANDLE psapi = LoadLibrary ("Psapi.dll");
+			HANDLE psapi = LoadLibrary (TEXT("Psapi.dll"));
 			if (!psapi) {
 				eprintf ("Error getting the handle to Psapi.dll\n");
 				return NULL;
 			}
-			GetProcessImageFileNameA = (GetProcessImageFileNameA_t) GetProcAddress (psapi, "GetProcessImageFileNameA");
-			if (!GetProcessImageFileNameA) {
-				eprintf ("Error getting the address of GetProcessImageFileNameA\n");
+			GetProcessImageFileName = (GetProcessImageFileName_t) GetProcAddress (psapi, W32_TCALL ("GetProcessImageFileName"));
+			if (!GetProcessImageFileName) {
+				eprintf ("Error getting the address of GetProcessImageFileName\n");
 				return NULL;
 			}
 		}
 	}
-#endif
 	HANDLE handle = NULL;
-	CHAR filename[MAX_PATH];
+	TCHAR filename[MAX_PATH];
 	DWORD maxlength = MAX_PATH;
 	handle = OpenProcess (PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
 	if (handle != NULL) {
-		if (QueryFullProcessImageNameA) {
-			if (QueryFullProcessImageNameA (handle, 0, filename, &maxlength) == 0) {
-				eprintf ("Error calling QueryFullProcessImageNameA\n");
+		if (QueryFullProcessImageName) {
+			if (QueryFullProcessImageName (handle, 0, filename, &maxlength) == 0) {
+				eprintf ("Error calling QueryFullProcessImageName\n");
 				CloseHandle (handle);
 				return NULL;
 			}
 		} else {
-			if (GetProcessImageFileNameA (handle, filename, maxlength) == 0) {
-				eprintf ("Error calling GetProcessImageFileNameA\n");
+			if (GetProcessImageFileName (handle, filename, maxlength) == 0) {
+				eprintf ("Error calling GetProcessImageFileName\n");
 				CloseHandle (handle);
 				return NULL;
 			}
 		}
 		CloseHandle (handle);
-		return strdup (filename);
+		return r_sys_conv_utf16_to_utf8 (filename);
 	}
 	return NULL;
+#else
+	HANDLE processHandle = NULL;
+	TCHAR filename[FILENAME_MAX];
+
+	processHandle = OpenProcess (PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+	if (processHandle != NULL) {
+		if (GetModuleFileNameEx (processHandle, NULL, filename, FILENAME_MAX) == 0) {
+			eprintf ("r_sys_pid_to_path: Cannot get module filename.");
+		} else {
+			return strdup (filename);
+		}
+		CloseHandle (processHandle);
+	} else {
+		eprintf ("r_sys_pid_to_path: Cannot open process.");
+	}
+	return NULL;
+#endif
 #elif __APPLE__
 #if __POWERPC__
 #warning TODO getpidproc
@@ -898,11 +963,12 @@ R_API char *r_sys_pid_to_path(int pid) {
 #endif
 }
 
-static char** env = NULL;
-
+// TODO: rename to r_sys_env_init()
 R_API char **r_sys_get_environ () {
-#if __APPLE__ && !__POWERPC__
+#if __APPLE__ && !HAVE_ENVIRON
 	env = *_NSGetEnviron();
+#else
+	env = environ;
 #endif
 	// return environ if available??
 	if (!env) {
@@ -953,4 +1019,17 @@ R_API bool r_sys_tts(const char *txt, bool bg) {
 		}
 	}
 	return false;
+}
+
+static char *prefix = NULL;
+
+R_API const char *r_sys_prefix(const char *pfx) {
+	if (pfx) {
+		free (prefix);
+		prefix = strdup (pfx);
+	}
+	if (!prefix) {
+		prefix = strdup (R2_PREFIX);
+	}
+	return prefix;
 }

@@ -5,26 +5,27 @@
 #include <r_debug.h>
 
 static int __io_step(RDebug *dbg) {
-	dbg->iob.system (dbg->iob.io, "ds");
-	r_cons_reset ();
-	return 0;
+	free (dbg->iob.system (dbg->iob.io, "ds"));
+	return true;
 }
 
 static int __io_step_over(RDebug *dbg) {
-	dbg->iob.system (dbg->iob.io, "dso");
-	r_cons_reset ();
+	free (dbg->iob.system (dbg->iob.io, "dso"));
 	return true;
 }
 
 static RList *__io_maps(RDebug *dbg) {
 	RList *list = r_list_new ();
-	dbg->iob.system (dbg->iob.io, "dm");
-	char *ostr, *str = strdup (r_cons_get_buffer ());
+	char *str = dbg->iob.system (dbg->iob.io, "dm");
+	if (!str) {
+		r_list_free (list);
+		return NULL;
+	}
+	char *ostr = str;
 	ut64 map_start, map_end;
 	char perm[32];
 	char name[512];
-	ostr = str;
-	while (true) {
+	for (;;) {
 		char *nl = strchr (str, '\n');
 		if (nl) {
 			*nl = 0;
@@ -77,7 +78,10 @@ static int __io_attach(RDebug *dbg, int pid) {
 // "drp" register profile
 static char *__io_reg_profile(RDebug *dbg) {
 	r_cons_push ();
-	dbg->iob.system (dbg->iob.io, "drp");
+	char *drp = dbg->iob.system (dbg->iob.io, "drp");
+	if (drp) {
+		return drp;
+	}
 	const char *buf = r_cons_get_buffer ();
 	if (buf && *buf) {
 		char *ret = strdup (buf);
@@ -88,26 +92,34 @@ static char *__io_reg_profile(RDebug *dbg) {
 }
 
 // "dr8" read register state
-static int __io_read(RDebug *dbg, int type, ut8 *buf, int size) {
-	dbg->iob.system (dbg->iob.io, "dr8");
-	char *regs = strdup (r_cons_get_buffer ());
-	ut8 *bregs = calloc (1, strlen (regs));
+static int __reg_read(RDebug *dbg, int type, ut8 *buf, int size) {
+	char *dr8 = dbg->iob.system (dbg->iob.io, "dr8");
+	if (!dr8) {
+		const char *fb = r_cons_get_buffer ();
+		if (!fb || !*fb) {
+			eprintf ("debug.io: Failed to get dr8 from io\n");
+			return -1;
+		}
+		dr8 = strdup (fb);
+		r_cons_reset ();
+	}
+	ut8 *bregs = calloc (1, strlen (dr8));
 	if (!bregs) {
-		free (regs);
+		free (dr8);
 		return -1;
 	}
-	r_cons_reset ();
-	int sz = r_hex_str2bin (regs, bregs);
+	r_str_trim ((char *)bregs);
+	int sz = r_hex_str2bin (dr8, bregs);
 	if (sz > 0) {
 		memcpy (buf, bregs, R_MIN (size, sz));
 		free (bregs);
-		free (regs);
+		free (dr8);
 		return size;
 	} else {
-		eprintf ("SIZE %d (%s)\n", sz, regs);
+		// eprintf ("SIZE %d (%s)\n", sz, regs);
 	}
 	free (bregs);
-	free (regs);
+	free (dr8);
 	return -1;
 }
 
@@ -135,11 +147,12 @@ RDebugPlugin r_debug_plugin_io = {
 	.map_get = __io_maps,
 	.attach = &__io_attach,
 	.wait = &__io_wait,
-	.reg_read = __io_read,
+	.reg_read = __reg_read,
 	.cont = __io_continue,
 	.kill = __io_kill,
 	.reg_profile = __io_reg_profile,
 	.step_over = __io_step_over,
+	.canstep = 1,
 #if 0
 	.init = __esil_init,
 	.contsc = __esil_continue_syscall,

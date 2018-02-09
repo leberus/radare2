@@ -11,9 +11,7 @@ R_API void r_debug_plugin_init(RDebug *dbg) {
 	int i;
 	dbg->plugins = r_list_newf (free);
 	for (i = 0; debug_static_plugins[i]; i++) {
-		RDebugPlugin *p = R_NEW (RDebugPlugin);
-		memcpy (p, debug_static_plugins[i], sizeof (RDebugPlugin));
-		r_debug_plugin_add (dbg, p);
+		r_debug_plugin_add (dbg, debug_static_plugins[i]);
 	}
 }
 
@@ -32,7 +30,7 @@ R_API bool r_debug_use(RDebug *dbg, const char *str) {
 			}
 		}
 	}
-	if (dbg->h && dbg->h->reg_profile) {
+	if (dbg && dbg->h && dbg->h->reg_profile) {
 		char *p = dbg->h->reg_profile (dbg);
 		if (p) {
 			r_reg_set_profile_string (dbg->reg, p);
@@ -40,15 +38,16 @@ R_API bool r_debug_use(RDebug *dbg, const char *str) {
 				r_reg_free (dbg->anal->reg);
 				dbg->anal->reg = dbg->reg;
 			}
-			if (dbg->h->init)
+			if (dbg->h->init) {
 				dbg->h->init (dbg);
+			}
 			r_reg_set_profile_string (dbg->reg, p);
 			free (p);
 		} else {
 			eprintf ("Cannot retrieve reg profile from debug plugin (%s)\n", dbg->h->name);
 		}
 	}
-	return (dbg->h != NULL);
+	return (dbg && dbg->h);
 }
 
 R_API int r_debug_plugin_list(RDebug *dbg, int mode) {

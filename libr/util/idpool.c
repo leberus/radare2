@@ -6,8 +6,8 @@
 ut32 get_msb(ut32 v) {
 	int i;
 	for (i = 31; i > (-1); i--) {
-		if (v & (0x1 << i)) {
-			return (v & (0x1 << i));
+		if (v & (0x1U << i)) {
+			return (v & (0x1U << i));
 		}
 	}
 	return 0;
@@ -75,6 +75,7 @@ R_API RIDStorage* r_id_storage_new(ut32 start_id, ut32 last_id) {
 	if ((start_id < 16) && (pool = r_id_pool_new (start_id, last_id))) {
 		storage = R_NEW0 (RIDStorage);
 		if (!storage) {
+			r_id_pool_free (pool);
 			return NULL;
 		}
 		storage->pool = pool;
@@ -83,23 +84,17 @@ R_API RIDStorage* r_id_storage_new(ut32 start_id, ut32 last_id) {
 }
 
 static bool id_storage_reallocate(RIDStorage* storage, ut32 size) {
-	void* data;
 	if (!storage) {
 		return false;
 	}
-	if (storage->size == size) {
-		return true;
+	void **data = realloc (storage->data, size * sizeof (void*));
+	if (!data) {
+		return false;
 	}
-	if (storage->size > size) {
-		storage->data = realloc (storage->data, size * sizeof(void*));
-		storage->size = size;
-		return true;
+	if (size > storage->size) {
+		memset (data + storage->size, 0, (size - storage->size) * sizeof (void*));
 	}
-	data = storage->data;
-	storage->data = R_NEWS0 (void*, size);
-	if (data) {
-		memcpy (storage->data, data, storage->size * sizeof(void*));
-	}
+	storage->data = data;
 	storage->size = size;
 	return true;
 }
@@ -199,4 +194,15 @@ R_API void r_id_storage_free(RIDStorage* storage) {
 		free (storage->data);
 	}
 	free (storage);
+}
+
+static bool _list(void* user, void* data, ut32 id) {
+	r_list_append (user, data);
+	return true;
+}
+
+R_API RList *r_id_storage_list(RIDStorage *s) {
+	RList *list = r_list_newf (NULL);
+	r_id_storage_foreach (s, _list, list);
+	return list;
 }

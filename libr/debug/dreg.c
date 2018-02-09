@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2016 - pancake */
+/* radare - LGPL - Copyright 2009-2017 - pancake */
 
 #include <r_core.h> // just to get the RPrint instance
 #include <r_debug.h>
@@ -50,8 +50,10 @@ R_API int r_debug_reg_sync(RDebug *dbg, int type, int write) {
 					eprintf ("r_debug_reg: error writing "
 						"registers %d to %d\n", i, dbg->tid);
 				}
+				free (buf);
 				return false;
 			}
+			free (buf);
 		} else {
 			// int bufsize = R_MAX (1024, dbg->reg->size*2); // i know. its hacky
 			int bufsize = dbg->reg->size;
@@ -96,7 +98,7 @@ R_API int r_debug_reg_list(RDebug *dbg, int type, int size, int rad, const char 
 	if (dbg->corebind.core) {
 		pr = ((RCore*)dbg->corebind.core)->print;
 	}
-	if (!(dbg->reg->bits & size)) {
+	if (size != 0 && !(dbg->reg->bits & size)) {
 		// TODO: verify if 32bit exists, otherwise use 64 or 8?
 		size = 32;
 	}
@@ -136,24 +138,13 @@ R_API int r_debug_reg_list(RDebug *dbg, int type, int size, int rad, const char 
 		r_list_foreach (head, iter, item) {
 			ut64 value;
 			utX valueBig;
-#if 0
-			bool is_arm = dbg->arch && strstr (dbg->arch, "arm");
-
-			/* the thumb flag in the cpsr register shouldnt forbid us to switch between arm or thumb */
-			/* this code must run only after a step maybe ... need some discussion, disabling for now */
-			if (is_arm && (rad == 1 || rad == '*') && item->size == 1) {
-				if (!strcmp (item->name, "tf")) {
-					bool is_thumb = r_reg_get_value (dbg->reg, item);
-					int new_bits = is_thumb? 16: 32;
-					if (dbg->anal->bits != new_bits)
-						dbg->cb_printf ("e asm.bits=%d\n", new_bits);
-				}
-				continue;
-			}
-#endif
 			if (type != -1) {
-				if (type != item->type && R_REG_TYPE_FLG != item->type) continue;
-				if (size != 0 && size != item->size) continue;
+				if (type != item->type && R_REG_TYPE_FLG != item->type) {
+					continue;
+				}
+				if (size != 0 && size != item->size) {
+					continue;
+				}
 			}
 			int regSize = item->size;
 			if (regSize < 80) {
@@ -194,10 +185,12 @@ R_API int r_debug_reg_list(RDebug *dbg, int type, int size, int rad, const char 
 			case '-':
 				dbg->cb_printf ("f-%s\n", item->name);
 				break;
+			case 'R':
+				dbg->cb_printf ("aer %s = %s\n", item->name, strvalue);
+				break;
 			case 1:
 			case '*':
-				dbg->cb_printf ("f %s 1 0x%s\n",
-					item->name, strvalue);
+				dbg->cb_printf ("f %s 1 %s\n", item->name, strvalue);
 				break;
 			case 'd':
 			case 2:
@@ -212,7 +205,7 @@ R_API int r_debug_reg_list(RDebug *dbg, int type, int size, int rad, const char 
 					}
 					strcpy (whites, kwhites);
 					if (delta && use_color) {
-						dbg->cb_printf (use_color);
+						dbg->cb_printf ("%s", use_color);
 					}
 					if (item->flags) {
 						str = r_reg_get_bvalue (dbg->reg, item);

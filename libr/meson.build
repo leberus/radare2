@@ -1,19 +1,24 @@
 anal = [
 	'6502',
+	'8051',
 	'arc',
+	'avr',
 	'arm_cs',
 	'bf',
+	'cr16',
 	'cris',
 	'dalvik',
 	'i4004',
 	'i8080',
+	'gb',
 	'm68k_cs',
 	'malbolge',
 	'mips_cs',
 	'mips_gnu',
+	'msp430',
 	'nios2',
 	'null',
-	'pic18c',
+	'pic',
 	'ppc_cs',
 	'ppc_gnu',
 	'riscv',
@@ -22,20 +27,27 @@ anal = [
 	'sparc_cs',
 	'sparc_gnu',
 	'sysz',
+	'tms320',
 	'vax',
+	'v810',
+	'v850',
 	'ws',
 	'x86_cs',
+	'x86_udis',
 	'xap',
 	'xcore_cs',
 	'z80',
 ]
 asm = [
 	'6502',
+	'8051',
 	'arc',
+	'avr',
 	'arm_as',
 	'arm_cs',
 	'arm_winedbg',
 	'bf',
+	'cr16',
 	'cris_gnu',
 	'dalvik',
 	'dcpu16',
@@ -45,14 +57,16 @@ asm = [
 	'i4004',
 	'i8080',
 	'lanai_gnu',
+	'lh5801',
 	'lm32',
 	'm68k_cs',
 	'malbolge',
 	'mcs96',
 	'mips_cs',
 	'mips_gnu',
+	'msp430',
 	'nios2',
-	'pic18c',
+	'pic',
 	'ppc_cs',
 	'ppc_gnu',
 	'riscv',
@@ -62,7 +76,9 @@ asm = [
 	'sparc_gnu',
 	'spc700',
 	'sysz',
+	'tms320',
 	'tricore',
+	'v810',
 	'v850',
 	'vax',
 	'wasm',
@@ -71,6 +87,7 @@ asm = [
 	'x86_cs',
 	'x86_nasm',
 	'x86_nz',
+	'x86_udis',
 	'xap',
 	'xcore_cs',
 	'z80',
@@ -94,6 +111,7 @@ bin = [
 	'mach0',
 	'mach064',
 	'mbn',
+	'mdmp',
 	'menuet',
 	'mz',
 	'nes',
@@ -117,6 +135,7 @@ bin = [
 	'wasm',
 	'xbe',
 	'zimg',
+	'z64',
 ]
 
 bin_xtr = [
@@ -151,7 +170,8 @@ crypto = [
 	'rol',
 	'ror',
 	'rot',
-	'xor'
+	'xor',
+	'serpent'
 ]
 
 debug = [
@@ -159,7 +179,9 @@ debug = [
 	'esil',
 	'io',
 	'native',
-	'rap'
+	'rap',
+	'gdb',
+	'windbg'
 ]
 
 egg = [
@@ -187,9 +209,11 @@ fs = [
 ]
 
 io = [
+	'ar',
 	'bfdbg',
 	'debug',
 	'default',
+	'gdb',
 	'gzip',
 	'http',
 	'ihex',
@@ -206,7 +230,9 @@ io = [
 	'self',
 	'shm',
 	'sparse',
-	'tcp'
+	'tcp',
+	'windbg',
+	'winedbg'
 ]
 if host_os == 'windows'
 io += [
@@ -227,5 +253,7 @@ parse = [
 	'mips_pseudo',
 	'mreplace',
 	'ppc_pseudo',
+	'sh_pseudo',
+	'avr_pseudo',
 	'x86_pseudo',
 ]

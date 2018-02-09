@@ -29,12 +29,14 @@ R_API int r_core_gdiff(RCore *c, RCore *c2) {
 	RListIter *iter, *iter2;
 	int i;
 
-	if (!c || !c2)
+	if (!c || !c2) {
 		return false;
+	}
 	for (i = 0; i < 2; i++) {
 		/* remove strings */
 		r_list_foreach_safe (cores[i]->anal->fcns, iter, iter2, fcn) {
 			if (!strncmp (fcn->name, "str.", 4)) {
+				r_anal_fcn_tree_delete (&cores[i]->anal->fcn_tree, fcn);
 				r_list_delete (cores[i]->anal->fcns, iter);
 			}
 		}

@@ -11,7 +11,7 @@ extern RJSVar *r_x509_name_json (RX509Name* name);
 
 bool r_pkcs7_parse_certificaterevocationlists (RPKCS7CertificateRevocationLists *crls, RASN1Object *object) {
 	ut32 i;
-	if (!crls && !object) {
+	if (!crls || !object) {
 		return false;
 	}
 	if (object->list.length > 0) {
@@ -41,7 +41,7 @@ void r_pkcs7_free_certificaterevocationlists (RPKCS7CertificateRevocationLists *
 
 bool r_pkcs7_parse_extendedcertificatesandcertificates (RPKCS7ExtendedCertificatesAndCertificates *ecac, RASN1Object *object) {
 	ut32 i;
-	if (!ecac && !object) {
+	if (!ecac || !object) {
 		return false;
 	}
 	if (object->list.length > 0) {
@@ -72,7 +72,7 @@ void r_pkcs7_free_extendedcertificatesandcertificates (RPKCS7ExtendedCertificate
 
 bool r_pkcs7_parse_digestalgorithmidentifier (RPKCS7DigestAlgorithmIdentifiers *dai, RASN1Object *object) {
 	ut32 i;
-	if (!dai && !object) {
+	if (!dai || !object) {
 		return false;
 	}
 	if (object->list.length > 0) {
@@ -117,12 +117,13 @@ bool r_pkcs7_parse_contentinfo (RPKCS7ContentInfo* ci, RASN1Object *object) {
 	if (!ci || !object || object->list.length < 1 || !object->list.objects[0]) {
 		return false;
 	}
-
 	ci->contentType = r_asn1_stringify_oid (object->list.objects[0]->sector, object->list.objects[0]->length);
 	if (object->list.length > 1) {
-		ci->content = r_asn1_create_binary (object->list.objects[1]->sector, object->list.objects[1]->length);
+		RASN1Object *obj1 = object->list.objects[1];
+		if (obj1) {
+			ci->content = r_asn1_create_binary (obj1->sector, obj1->length);
+		}
 	}
-
 	return true;
 }
 
@@ -138,10 +139,11 @@ bool r_pkcs7_parse_issuerandserialnumber (RPKCS7IssuerAndSerialNumber* iasu, RAS
 	if (!iasu || !object || object->list.length != 2) {
 		return false;
 	}
-
 	r_x509_parse_name (&iasu->issuer, object->list.objects[0]);
-	iasu->serialNumber = r_asn1_create_binary (object->list.objects[1]->sector, object->list.objects[1]->length);
-
+	RASN1Object *obj1 = object->list.objects[1];
+	if (obj1) {
+		iasu->serialNumber = r_asn1_create_binary (obj1->sector, obj1->length);
+	}
 	return true;
 }
 
@@ -180,11 +182,17 @@ bool r_pkcs7_parse_signerinfo (RPKCS7SignerInfo* si, RASN1Object *object) {
 		shift++;
 	}
 	if (shift < object->list.length) {
-		si->encryptedDigest = r_asn1_create_binary (object->list.objects[shift]->sector, object->list.objects[shift]->length);
-		shift++;
+		RASN1Object *obj1 = object->list.objects[shift];
+		if (obj1) {
+			si->encryptedDigest = r_asn1_create_binary (obj1->sector, obj1->length);
+			shift++;
+		}
 	}
-	if (shift < object->list.length && elems[shift]->klass == CLASS_CONTEXT && elems[shift]->tag == 1) {
-		r_pkcs7_parse_attributes (&si->unauthenticatedAttributes, elems[shift]);
+	if (shift < object->list.length) {
+		RASN1Object *elem = elems[shift];
+		if (elem && elem->klass == CLASS_CONTEXT && elem->tag == 1) {
+			r_pkcs7_parse_attributes (&si->unauthenticatedAttributes, elems[shift]);
+		}
 	}
 	return true;
 }
@@ -203,7 +211,7 @@ void r_pkcs7_free_signerinfo (RPKCS7SignerInfo* si) {
 
 bool r_pkcs7_parse_signerinfos (RPKCS7SignerInfos *ss, RASN1Object *object) {
 	ut32 i;
-	if (!ss && !object) {
+	if (!ss || !object) {
 		return false;
 	}
 	if (object->list.length > 0) {
@@ -248,12 +256,12 @@ bool r_pkcs7_parse_signeddata (RPKCS7SignedData *sd, RASN1Object *object) {
 	r_pkcs7_parse_digestalgorithmidentifier (&sd->digestAlgorithms, elems[1]);
 	r_pkcs7_parse_contentinfo (&sd->contentInfo, elems[2]);
 	//Optional
-	if (shift < object->list.length && elems[shift]->klass == CLASS_CONTEXT && elems[shift]->tag == 0) {
+	if (shift < object->list.length && elems[shift] && elems[shift]->klass == CLASS_CONTEXT && elems[shift]->tag == 0) {
 		r_pkcs7_parse_extendedcertificatesandcertificates (&sd->certificates, elems[shift]);
 		shift++;
 	}
 	//Optional
-	if (shift < object->list.length && elems[shift]->klass == CLASS_CONTEXT && elems[shift]->tag == 1) {
+	if (shift < object->list.length && elems[shift] && elems[shift]->klass == CLASS_CONTEXT && elems[shift]->tag == 1) {
 		r_pkcs7_parse_certificaterevocationlists (&sd->crls, elems[shift]);
 		shift++;
 	}
@@ -292,8 +300,12 @@ RCMS *r_pkcs7_parse_cms (const ut8 *buffer, ut32 length) {
 		free (container);
 		return NULL;
 	}
-	container->contentType = r_asn1_stringify_oid (object->list.objects[0]->sector, object->list.objects[0]->length);
-	r_pkcs7_parse_signeddata (&container->signedData, object->list.objects[1]->list.objects[0]);
+	if (object->list.objects[0]) {
+		container->contentType = r_asn1_stringify_oid (object->list.objects[0]->sector, object->list.objects[0]->length);
+	}
+	if (object->list.objects[1]) {
+		r_pkcs7_parse_signeddata (&container->signedData, object->list.objects[1]->list.objects[0]);
+	}
 	r_asn1_free_object (object);
 	return container;
 }
@@ -319,7 +331,10 @@ RPKCS7Attribute* r_pkcs7_parse_attribute (RASN1Object *object) {
 		attribute->oid = r_asn1_stringify_oid (object->list.objects[0]->sector, object->list.objects[0]->length);
 	}
 	if (object->list.length == 2) {
-		attribute->data = r_asn1_create_binary (object->list.objects[1]->sector, object->list.objects[1]->length);
+		RASN1Object * obj1 = object->list.objects[1];
+		if (obj1) {
+			attribute->data = r_asn1_create_binary (obj1->sector, obj1->length);
+		}
 	}
 	return attribute;
 }
@@ -451,6 +466,7 @@ char* r_x509_signedinfo_dump (RPKCS7SignerInfo *si, char* buffer, ut32 length, c
 	}
 	if (length <= p) {
 		free (pad3);
+		r_asn1_free_string (s);
 		return NULL;
 	}
 	r = snprintf (buffer + p, length - p, "%sSerial Number:\n%s%s\n", pad2, pad3, s ? s->string : "Missing");
@@ -608,25 +624,26 @@ char *r_pkcs7_cms_dump (RCMS* container) {
 
 RJSVar *r_x509_signedinfo_json (RPKCS7SignerInfo* si) {
 	RJSVar* array = NULL;
+	RJSVar* var = NULL;
 	RJSVar* obj = r_json_object_new ();
 	ut32 i;
 	if (!si) {
 		return obj;
 	}
 
-	r_json_object_add (obj, "Version", r_json_number_new (si->version + 1));
-	r_json_object_add (obj, "Issuer", r_x509_name_json (&si->issuerAndSerialNumber.issuer));
+	(void)r_json_object_add (obj, "Version", r_json_number_new (si->version + 1));
+	(void)r_json_object_add (obj, "Issuer", r_x509_name_json (&si->issuerAndSerialNumber.issuer));
 	if (si->issuerAndSerialNumber.serialNumber) {
 		RASN1Binary *o = si->issuerAndSerialNumber.serialNumber;
 		RASN1String *s = r_asn1_stringify_integer (o->binary, o->length);
 		if (s) {
-			r_json_object_add (obj, "SerialNumber", r_json_string_new (s->string));
+			(void)r_json_object_add (obj, "SerialNumber", r_json_string_new (s->string));
 		}
 		r_asn1_free_string (s);
 	}
 
 	if (si->digestAlgorithm.algorithm) {
-		r_json_object_add (obj, "DigestAlgorithm", r_json_string_new (si->digestAlgorithm.algorithm->string));
+		(void) r_json_object_add (obj, "DigestAlgorithm", r_json_string_new (si->digestAlgorithm.algorithm->string));
 	}
 
 	array = r_json_array_new (si->authenticatedAttributes.length);
@@ -637,23 +654,27 @@ RJSVar *r_x509_signedinfo_json (RPKCS7SignerInfo* si) {
 		}
 		RJSVar* attribute = r_json_object_new ();
 		if (attr->oid) {
-			r_json_object_add (attribute, "oid", r_json_string_new (attr->oid->string));
+			var = r_json_string_new (attr->oid->string);
+			R_JSON_FREE_ON_FAIL (r_json_object_add (attribute, "oid", var), var);
 		}
 		if (attr->data) {
-			r_json_object_add (attribute, "length", r_json_number_new (attr->data->length));
+			var = r_json_number_new (attr->data->length);
+			R_JSON_FREE_ON_FAIL (r_json_object_add (attribute, "length", var), var);
 		}
-		r_json_array_add (array, attribute);
+		R_JSON_FREE_ON_FAIL (r_json_array_add (array, attribute), attribute);
 	}
-	r_json_object_add (obj, "AuthenticatedAttributes", array);
+	R_JSON_FREE_ON_FAIL (r_json_object_add (obj, "AuthenticatedAttributes", array), array);
 	if (si->digestEncryptionAlgorithm.algorithm) {
-		r_json_object_add (obj, "DigestEncryptionAlgorithm", r_json_string_new (si->digestEncryptionAlgorithm.algorithm->string));
+		var = r_json_string_new (si->digestEncryptionAlgorithm.algorithm->string);
+		R_JSON_FREE_ON_FAIL (r_json_object_add (obj, "DigestEncryptionAlgorithm", var), var);
 	}
 
 	if (si->encryptedDigest) {
 		RASN1Binary *o = si->encryptedDigest;
 		RASN1String *s = r_asn1_stringify_integer (o->binary, o->length);
 		if (s) {
-			r_json_object_add (obj, "EncryptedDigest", r_json_string_new (s->string));
+			var = r_json_string_new (s->string);
+			R_JSON_FREE_ON_FAIL (r_json_object_add (obj, "EncryptedDigest", var), var);
 		}
 		r_asn1_free_string (s);
 	}
@@ -667,27 +688,31 @@ RJSVar *r_x509_signedinfo_json (RPKCS7SignerInfo* si) {
 		}
 		RJSVar* attribute = r_json_object_new ();
 		if (attr->oid) {
-			r_json_object_add (attribute, "oid", r_json_string_new (attr->oid->string));
+			var = r_json_string_new (attr->oid->string);
+			R_JSON_FREE_ON_FAIL (r_json_object_add (attribute, "oid", var), var);
 		}
 		if (attr->data) {
-			r_json_object_add (attribute, "length", r_json_number_new (attr->data->length));
+			var = r_json_number_new (attr->data->length);
+			R_JSON_FREE_ON_FAIL (r_json_object_add (attribute, "length", var), var);
 		}
-		r_json_array_add (array, attribute);
+		R_JSON_FREE_ON_FAIL (r_json_array_add (array, attribute), attribute);
 	}
-	r_json_object_add (obj, "UnauthenticatedAttributes", array);
+	R_JSON_FREE_ON_FAIL (r_json_object_add (obj, "UnauthenticatedAttributes", array), array);
 
 	return obj;
 }
 
 RJSVar *r_pkcs7_cms_json (RCMS* container) {
-	RJSVar* array;
+	RJSVar* array = NULL;
+	RJSVar* var = NULL;
 	RJSVar* obj = r_json_object_new ();
 	ut32 i;
 	if (!container) {
 		return obj;
 	}
 
-	r_json_object_add (obj, "Version", r_json_number_new (container->signedData.version));
+	var = r_json_number_new (container->signedData.version);
+	R_JSON_FREE_ON_FAIL (r_json_object_add (obj, "Version", var), var);
 	
 	if (container->signedData.digestAlgorithms.elements) {
 		array = r_json_array_new (container->signedData.digestAlgorithms.length);
@@ -695,31 +720,35 @@ RJSVar *r_pkcs7_cms_json (RCMS* container) {
 			if (container->signedData.digestAlgorithms.elements[i]) {
 				RASN1String *s = container->signedData.digestAlgorithms.elements[i]->algorithm;
 				if (s) {
-					r_json_array_add (array, r_json_string_new (s->string));
+					var = r_json_string_new (s->string);
+					R_JSON_FREE_ON_FAIL (r_json_array_add (array, var), var);
 				}
 			}
 		}
-		r_json_object_add (obj, "DigestAlgorithms", array);
+		R_JSON_FREE_ON_FAIL (r_json_object_add (obj, "DigestAlgorithms", array), array);
 	}
 
 	array = r_json_array_new (container->signedData.certificates.length);
 	for (i = 0; i < container->signedData.certificates.length; ++i) {
-		r_json_array_add (array, r_x509_certificate_json (container->signedData.certificates.elements[i]));
+		var = r_x509_certificate_json (container->signedData.certificates.elements[i]);
+		R_JSON_FREE_ON_FAIL (r_json_array_add (array, var), var);
 	}
-	r_json_object_add (obj, "Certificates", array);
+	R_JSON_FREE_ON_FAIL (r_json_object_add (obj, "Certificates", array), array);
 
 	array = r_json_array_new (container->signedData.crls.length);
 	for (i = 0; i < container->signedData.crls.length; ++i) {
-		r_json_array_add (array, r_x509_crl_json (container->signedData.crls.elements[i]));
+		var = r_x509_crl_json (container->signedData.crls.elements[i]);
+		R_JSON_FREE_ON_FAIL (r_json_array_add (array, var), var);
 	}
-	r_json_object_add (obj, "CRL", array);
+	R_JSON_FREE_ON_FAIL (r_json_object_add (obj, "CRL", array), array);
 
 	if (container->signedData.signerinfos.elements) {
 		array = r_json_array_new (container->signedData.signerinfos.length);
 		for (i = 0; i < container->signedData.signerinfos.length; ++i) {
-			r_json_array_add (array, r_x509_signedinfo_json (container->signedData.signerinfos.elements[i]));
+			var = r_x509_signedinfo_json (container->signedData.signerinfos.elements[i]);
+			R_JSON_FREE_ON_FAIL (r_json_array_add (array, var), var);
 		}
-		r_json_object_add (obj, "SignerInfos", array);
+		R_JSON_FREE_ON_FAIL (r_json_object_add (obj, "SignerInfos", array), array);
 	}
 	return obj;
 }
