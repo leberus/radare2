@@ -12,6 +12,7 @@
 #include <sys/uio.h>
 #include <errno.h>
 #include "linux_debug.h"
+#include "elf_specs.h"
 #include "../procfs.h"
 
 #include <sys/syscall.h>
@@ -990,5 +991,4 @@ RList *linux_desc_list (int pid) {
 	closedir (dd);
 	return ret;
 }
-
 #endif

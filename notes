@@ -1,0 +1,46 @@
+To modify a env:
+
+	- Create a new map on the tracee
+	- Copy the new env var we want to set up
+	- Swap the envp pointers, so the env[index_from_env_modified] points to the map, instead to our stack
+
+
+	typedef struct r_debug_env_map_t {
+		ut64 bytes_left;
+		ut64 position;
+		RDebugMap *map;
+	} RDebugEnvMap;
+	
+
+	RList maps
+
+
+	env = get_env()
+	if (!current) {
+		- create map
+		- Copy the new env var we want to set up
+		- Swap the envp pointers
+		- current_map = new_map
+	} else if (env has not been modified)
+		- get current_map
+		- compare strlen (new_env_string) <= current_map->bytes_left
+		- if smaller
+			- write new_env_string at current_map-> position
+			- update current_map->position and current_map->bytes_left
+		- if not
+			- function_new_mmap
+			- copy string there
+	} else {
+		/* current != NULL and env has been modified */
+		
+		- if new_string_len < current_string_len
+			- memset (0) pos_map until strlen (current_string_len)
+			- copy new_string
+			- move pos_map + current_string_len to pos_map + new_string_len
+		- if not
+			- memset (0) pos_map until strlen
+			- move pos_map + current_string_len to pos_map
+			- bytes_left += current_string_len
+			- current_pos -= bytes_left
+			- copy new_string at current_pos
+			- current_pos += new_string_len

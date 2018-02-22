@@ -1900,6 +1900,59 @@ static bool r_debug_gcore (RDebug *dbg, RBuffer *dest) {
 #endif
 }
 
+static RDebugEnvTrack *r_debug_native_env_get (RDebug *dbg, ut64 addr, ut64 limit) {
+	char env_path[128];
+	char *env_data;
+	RDebugEnvTrack *env_track = R_NEW0 (RDebugEnvTrack);
+
+	if (env_track) {
+		//Envtrack init
+		env_track->current_map = NULL;
+		env_track->envs = NULL;
+		env_track->env_maps = NULL;
+		env_track->modified= false;
+		env_track->n_env_vars = 0;
+
+		snprintf (env_path, sizeof (env_path), "/proc/%d/environ", dbg->pid);
+		env_data = r_file_slurp (env_path, NULL);
+
+		char *aux = env_data;
+		RList *list_env = r_list_new ();
+		RList *list_maps = r_list_new ();
+		int words = 0;
+		bool null = false;
+		for (;;) {
+			if (*env_data == '\0' && null) {
+				break;
+			} else if (*env_data == '\0') {
+				RDebugEnv *env = R_NEW0 (RDebugEnv);
+				char *p = aux;
+				char *pp;
+				pp = strtok (p, "=");
+				env->key = pp ? strdup (pp) : NULL;
+				pp = strtok (NULL, "=");
+				env->value = pp ? strdup (pp) : NULL;
+				env->addr = 0;
+				env->modified = false;
+				env->pos_map = 0;
+				env->map = NULL;
+				r_list_append (list_env, env);
+				null = true;
+				words++;
+				aux = env_data + 1;
+			} else {
+				null = false;
+			}
+			env_data++;
+		}
+		env_track->n_env_vars = words;
+		env_track->envs = list_env;
+		env_track->env_maps = list_maps;
+	}
+
+	return env_track;
+}
+
 struct r_debug_desc_plugin_t r_debug_desc_plugin_native = {
 	.open = r_debug_desc_native_open,
 	.list = r_debug_desc_native_list,
@@ -1970,6 +2023,7 @@ RDebugPlugin r_debug_plugin_native = {
 	.breakpoint = r_debug_native_bp,
 	.drx = r_debug_native_drx,
 	.gcore = r_debug_gcore,
+	.env_get = r_debug_native_env_get,
 };
 
 #ifndef CORELIB

@@ -38,6 +38,7 @@ static const char *help_msg_d[] = {
 	"dt", "[?]", "Display instruction traces (dtr=reset)",
 	"dw", " <pid>", "Block prompt until pid dies",
 	"dx", "[?]", "Inject and run code on target process (See gs)",
+	"dz", "[?]", "Show env variables",
 	NULL
 };
 
@@ -443,6 +444,16 @@ static const char *help_msg_dx[] = {
 	"\nExamples:", "", "",
 	"dx", " 9090", "Inject two x86 nop",
 	"\"dxa mov eax,6;mov ebx,0;int 0x80\"", "", "Inject and restore state",
+	NULL
+};
+
+static const char *help_msg_dz[] = {
+	"Usage: dz", "", "Environment commands",
+	"dz", "", "Show all environment variables",
+	"dzl", "", "Show all environment variables (long output)",
+	"dzg [env_name]", "", "Show [env_name]",
+	"dzgl [env_name]", "", "Show [env_name] (long output)",
+	"dzs [env_name]=[env_value]", "", "Set [env_name] to [env_value]",
 	NULL
 };
 
@@ -1458,6 +1469,66 @@ static int r_debug_heap(RCore *core, const char *input) {
 		eprintf ("MALLOC algorithm not supported\n");
 		return false;
 	}
+	return true;
+}
+
+static int cmd_debug_env(RCore *core, const char *input) {
+	RListIter *iter;
+	RDebugEnvTrack *env = core->dbg->env;
+	bool need_sync = false;
+
+	if (!env) {
+		need_sync = true;
+	} else {
+		if (env->modified) {
+			need_sync = true;
+		}
+	}
+
+	switch (input[0]) {
+		case '?':
+			r_core_cmd_help (core, help_msg_dz);
+			break;
+		case '\0': // "dz"
+		case 'l':  // "dzl" (dz with long output)
+			{
+				bool long_output = input[0] == 'l' ? true : false;
+				if (need_sync) {
+					eprintf ("cmd_debug_env: calling r_debug_env_sync\n");
+					r_debug_env_sync (core->dbg);
+				}
+				r_debug_print_env (core->dbg, long_output);
+			}
+			break;
+		case 'g':
+			if (input[1] != 'l' && input[1] != ' ' ) {
+				r_core_cmd_help (core, help_msg_dz);
+			} else {
+				bool long_output = input[1] == 'l' ? true : false;
+				int index = long_output ? 3 : 2;
+				if (need_sync) {
+					eprintf ("cmd_debug_env: calling r_debug_env_sync\n");
+					r_debug_env_sync (core->dbg);
+				}
+				r_debug_env_name_get (core->dbg, input + index, long_output);
+			}
+			break;
+		case 's':
+			{
+				char *key = strtok (input + 2, "=");
+				char *val = strtok (NULL, "=");
+				if (!key || !val) {
+					r_core_cmd_help (core, help_msg_dz);
+				} else {
+					r_debug_env_name_set (core->dbg, key, val);
+				}
+			}
+			break;
+		default:
+			r_core_cmd_help (core, help_msg_dz);
+			break;
+	}
+
 	return true;
 }
 
@@ -4343,6 +4414,9 @@ static int cmd_debug(void *data, const char *input) {
 		} else {
 			r_debug_plugin_list (core->dbg, 0);
 		}
+		break;
+	case 'z': // "dz"
+		cmd_debug_env (core, input + 1);
 		break;
 	case 'i': // "di"
 		{

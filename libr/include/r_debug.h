@@ -142,6 +142,32 @@ typedef struct r_debug_map_t {
 	bool shared;
 } RDebugMap;
 
+#if __linux__
+typedef struct r_debug_env_map_t {
+        ut64 bytes_left;
+        ut64 current_pos;
+        RDebugMap *map;
+} RDebugEnvMap;
+
+typedef struct r_debug_env_t {
+	char *key;
+	char *value;
+	ut64 addr;
+	bool modified;
+	ut64 pos_map;
+	RDebugEnvMap *map;
+} RDebugEnv;
+
+typedef struct r_debug_env_track_t {
+	RDebugEnvMap *current_map;
+	bool modified;
+	int n_env_vars;
+	RList *envs;
+	RList *env_maps;
+} RDebugEnvTrack;
+#endif
+
+
 typedef struct r_debug_signal_t {
 	int type;
 	int num;
@@ -307,6 +333,9 @@ typedef struct r_debug_t {
 	int _mode;
 	RNum *num;
 	REgg *egg;
+#if __linux__
+	RDebugEnvTrack *env;
+#endif
 } RDebug;
 
 typedef struct r_debug_desc_plugin_t {
@@ -386,6 +415,7 @@ typedef struct r_debug_plugin_t {
 	int (*init)(RDebug *dbg);
 	int (*drx)(RDebug *dbg, int n, ut64 addr, int size, int rwx, int g);
 	RDebugDescPlugin desc;
+	RDebugEnvTrack *(*env_get)(RDebug *dbg, ut64 addr, ut64 addr_end);
 	// TODO: use RList here
 } RDebugPlugin;
 
@@ -487,6 +517,10 @@ R_API RDebugMap *r_debug_map_new (char *name, ut64 addr, ut64 addr_end, int perm
 R_API void r_debug_map_free(RDebugMap *map);
 R_API void r_debug_map_list(RDebug *dbg, ut64 addr, int rad);
 R_API void r_debug_map_list_visual(RDebug *dbg, ut64 addr, int use_color, int cons_cols);
+
+/* environment */
+R_API bool r_debug_env_sync(RDebug *dbg);
+R_API void r_debug_print_env (RDebug *dbg, bool long_output);
 
 /* descriptors */
 R_API RDebugDesc *r_debug_desc_new (int fd, char* path, int perm, int type, int off);

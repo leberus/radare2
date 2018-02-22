@@ -2126,8 +2126,8 @@ static void do_string_search(RCore *core, RInterval search_itv, struct search_pa
 				RSearchKeyword *kw = r_list_first (core->search->kws);
 				int lenstr = kw? kw->keyword_length: 0;
 				const char *bytestr = lenstr > 1? "bytes": "byte";
-				eprintf ("Searching %d %s in [0x%"PFMT64x "-0x%"PFMT64x "]\n",
-					kw? kw->keyword_length: 0, bytestr, itv.addr, r_itv_end (itv));
+//				eprintf ("Searching %d %s in [0x%"PFMT64x "-0x%"PFMT64x "]\n",
+					//kw? kw->keyword_length: 0, bytestr, itv.addr, r_itv_end (itv));
 			}
 			if (r_sandbox_enable (0) && itv.size > 1024 * 64) {
 				eprintf ("Sandbox restricts search range\n");
@@ -2182,7 +2182,7 @@ static void do_string_search(RCore *core, RInterval search_itv, struct search_pa
 			print_search_progress (at, to1, search->nhits);
 			r_cons_clear_line (1);
 			core->num->value = search->nhits;
-			eprintf ("hits: %" PFMT64d "\n", search->nhits - saved_nhits);
+//			eprintf ("hits: %" PFMT64d "\n", search->nhits - saved_nhits);
 		}
 done:
 		r_cons_break_pop ();
