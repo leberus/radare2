@@ -2184,6 +2184,12 @@ ut8 *Elf_(r_bin_elf_grab_regstate)(ELFOBJ *bin, int *len) {
 				continue;
 			}
 			int bits = Elf_(r_bin_elf_get_bits)(bin);
+			int elf_nhdr_size = (bits == 64) ? sizeof (Elf64_Nhdr) : sizeof (Elf32_Nhdr);
+			void *elf_nhdr = calloc (elf_nhdr_size, 1);
+
+			r_buf_read_at (bin->b, bin->phdr[i].p_offset, elf_nhdr, elf_nhdr_size);
+			eprintf ("elf_nhdr->n_type: %d\n", ((Elf64_Nhdr *)elf_nhdr)->n_type);
+
 			int regdelta = (bits == 64)? 0x84: 0x40; // x64 vs x32
 			int regsize = 160; // for x86-64
 			ut8 *buf = malloc (regsize);
